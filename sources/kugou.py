@@ -1,0 +1,78 @@
+"""酷狗音乐源（青听 music.json 中的 kg 子源）：搜索可用，播放接口易风控"""
+
+import asyncio
+
+from .base import MusicItem, MusicSource
+
+SEARCH_URL = "https://songsearch.kugou.com/song_search_v2"
+PLAY_URL = "https://wwwapi.kugou.com/yy/index.php"
+
+
+class KugouSource(MusicSource):
+    """酷狗：song_search_v2 搜索。播放接口受风控，失败时由调用方换源"""
+
+    name = "kugou"
+    display_name = "酷狗"
+
+    async def search(self, keyword: str, limit: int = 5) -> list[MusicItem]:
+        def _do():
+            r = self.session.get(
+                SEARCH_URL,
+                params={"keyword": keyword, "page": 1, "pagesize": limit, "platform": "WebFilter"},
+                timeout=12,
+            )
+            return r.json()
+
+        try:
+            j = await asyncio.to_thread(_do)
+        except Exception:
+            return []
+        lists = (j.get("data") or {}).get("lists") or []
+        items = []
+        for s in lists:
+            fhash = s.get("FileHash", "")
+            if not fhash:
+                continue
+            items.append(
+                MusicItem(
+                    source=self.name,
+                    id=fhash,
+                    title=s.get("SongName", ""),
+                    artist=s.get("SingerName", ""),
+                    album=s.get("AlbumName", ""),
+                    duration=int(s.get("Duration", 0) or 0),
+                    artwork=s.get("ImgUrl", "") or "",
+                    extra={"album_id": s.get("AlbumID", "")},
+                )
+            )
+        return items[:limit]
+
+    async def get_media_url(self, item: MusicItem, quality: str = "standard") -> str:
+        """v2 play/getdata 接口；dfid 缺失时先访问主页获取"""
+        def _do():
+            try:
+                self.session.get("https://www.kugou.com/", timeout=8)
+            except Exception:
+                pass
+            dfid = self.session.cookies.get("kg_dfid") or self.session.cookies.get("dfid") or "1Q2W3E4R5T6"
+            r = self.session.get(
+                PLAY_URL,
+                params={
+                    "r": "play/getdata", "hash": item.id,
+                    "album_id": item.extra.get("album_id", ""),
+                    "dfid": dfid, "mid": "1234567890", "platid": 4, "appid": 1014,
+                },
+                headers={"Referer": "https://www.kugou.com/"},
+                timeout=12,
+            )
+            return r.json()
+
+        try:
+            j = await asyncio.to_thread(_do)
+            data = j.get("data") or {}
+            url = data.get("play_url") or data.get("url") or ""
+            if url.startswith("http"):
+                return url
+        except Exception:
+            pass
+        return ""

@@ -1,0 +1,103 @@
+{
+  "sources": {
+    "description": "启用音乐源（逗号分隔：netease,kuwo,kugou,qqmusic,bilibili）",
+    "type": "string",
+    "default": "netease,kuwo,kugou,qqmusic,bilibili",
+    "hint": "留空表示全部启用"
+  },
+  "search_limit": {
+    "description": "搜索结果条数",
+    "type": "int",
+    "default": 5
+  },
+  "select_timeout": {
+    "description": "选歌等待秒数",
+    "type": "int",
+    "default": 30
+  },
+  "frequency_seconds": {
+    "description": "每人点歌间隔秒数（0 表示不限）",
+    "type": "int",
+    "default": 30
+  },
+  "voice_mode": {
+    "description": "语音发送模式：url 直发 / amr 转码 / off 关闭",
+    "type": "string",
+    "default": "url"
+  },
+  "enable_card": {
+    "description": "是否发送 QQ 音乐卡片（语音不可用时的回退形式）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_stats": {
+    "description": "是否启用点歌统计（点歌 统计 查看）",
+    "type": "bool",
+    "default": true
+  },
+  "queue_limit": {
+    "description": "每个群播放队列上限",
+    "type": "int",
+    "default": 10
+  },
+  "queue_interval": {
+    "description": "队列歌曲自动播放间隔秒数",
+    "type": "int",
+    "default": 5
+  },
+  "admins": {
+    "description": "额外管理员QQ（逗号分隔，可用 /song set 调整配置）",
+    "type": "string",
+    "default": ""
+  },
+  "quality": {
+    "description": "默认音质：standard 标准 / high 高 / low 低（高音质失败自动降级）",
+    "type": "string",
+    "default": "standard"
+  },
+  "daily_limit": {
+    "description": "每人每日点歌次数上限（0 表示不限）",
+    "type": "int",
+    "default": 0
+  },
+  "aliases": {
+    "description": "自定义点歌指令别名（逗号分隔，如：点播,来一曲）",
+    "type": "string",
+    "default": ""
+  },
+  "enable_artwork": {
+    "description": "是否显示封面图（卡片不可用时回退展示封面）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_lyric": {
+    "description": "播放时是否附带歌词（仅网易云源）",
+    "type": "bool",
+    "default": true
+  },
+  "hot_push_enable": {
+    "description": "是否开启每日定时热门推送",
+    "type": "bool",
+    "default": false
+  },
+  "hot_push_time": {
+    "description": "定时热门推送时间（HH:MM，24 小时制）",
+    "type": "string",
+    "default": "21:00"
+  },
+  "hot_push_groups": {
+    "description": "推送目标群号（逗号分隔）",
+    "type": "string",
+    "default": ""
+  },
+  "hot_push_platform": {
+    "description": "推送使用的平台 ID（默认 onebot）",
+    "type": "string",
+    "default": "onebot"
+  },
+  "cache_max_mb": {
+    "description": "语音转码缓存目录大小上限（MB，超出自动清理最旧文件）",
+    "type": "int",
+    "default": 200
+  }
+}
