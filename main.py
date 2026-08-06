@@ -88,7 +88,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.0")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.1")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -473,7 +473,7 @@ class MusicPlugin(Star):
                 return self._send_text(event, "😢 没找到包含这段歌词的歌，换个词试试？")
             head = f"🎶 按歌词找到这些歌{(f"（{hint}）") if hint else ""}，回复序号播放："
             self._pending.setdefault(group_id, {})[user_id] = {
-                "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality,
+                "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality, "group_id": group_id,
             }
             return self._send_text(event, self._fmt_list(items, 1, 1, head))
         items = self._merge_results(results, kw)
@@ -499,7 +499,7 @@ class MusicPlugin(Star):
         if blocked_n:
             head += f"（已过滤 {blocked_n} 条屏蔽结果）"
         self._pending.setdefault(group_id, {})[user_id] = {
-            "mode": mode, "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality,
+            "mode": mode, "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality, "group_id": group_id,
         }
         page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
         return self._send_text(event, self._fmt_list(page_items, page, total, head))
@@ -545,7 +545,7 @@ class MusicPlugin(Star):
         if not items:
             return self._send_text(event, "😢 热门榜单获取失败，稍后再试～")
         self._pending.setdefault(group_id, {})[user_id] = {
-            "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": "热门", "quality": "",
+            "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": "热门", "quality": "", "group_id": group_id,
         }
         page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
         return self._send_text(event, self._fmt_list(page_items, page, total))
@@ -691,7 +691,8 @@ class MusicPlugin(Star):
             return
         target = str(self._cfg("hot_push_time", "21:00")).strip()
         now = time.strftime("%H:%M")
-        if now != target:
+        # 30 秒轮询可能错过精确分钟：到达或超过目标时间即推送（同日仅一次，由 push_state 保证）
+        if now < target:
             return
         groups = [g.strip() for g in str(self._cfg("hot_push_groups", "")).replace("，", ",").split(",") if g.strip().isdigit()]
         if not groups:
@@ -793,7 +794,9 @@ class MusicPlugin(Star):
             return self._send_text(event, "你当前没有选歌列表，发「/点歌 歌名」开始吧～")
         try:
             if time.time() - sess["ts"] > int(self._cfg("select_timeout", 30, group_id)):
-                self._pending.pop(group_id, None)
+                pending.pop(user_id, None)
+                if not pending:
+                    self._pending.pop(group_id, None)
                 return self._send_text(event, "⏳ 选歌已超时，请重新搜索～")
             if cmd in ("下一页", "下页", "更多", "下一批"):
                 sess["page"] += 1
@@ -836,13 +839,17 @@ class MusicPlugin(Star):
             return None
         try:
             if time.time() - sess["ts"] > int(self._cfg("select_timeout", 30, group_id)):
-                self._pending.pop(group_id, None)
+                pending.pop(user_id, None)
+                if not pending:
+                    self._pending.pop(group_id, None)
                 return None
             idx = int(m.group(1))
             items = sess["items"]
             if not 1 <= idx <= len(items):
                 return self._send_text(event, f"序号要在 1-{len(items)} 之间哦～")
-            self._pending.pop(group_id, None)
+            pending.pop(user_id, None)
+            if not pending:
+                self._pending.pop(group_id, None)
             # 翻页后的全局序号
             per = max(1, int(self._cfg("search_limit", 5, group_id)))
             global_idx = (int(sess.get("page", 1)) - 1) * per + idx
@@ -916,7 +923,7 @@ class MusicPlugin(Star):
                 if not items:
                     return self._send_text(event, "你还没有收藏。发「/点歌 收藏 歌名」试试～")
                 self._pending.setdefault(group_id, {})[user_id] = {
-                    "mode": "favlist", "items": items, "page": 1, "ts": time.time(), "kw": "收藏", "quality": "",
+                    "mode": "favlist", "items": items, "page": 1, "ts": time.time(), "kw": "收藏", "quality": "", "group_id": group_id,
                 }
                 page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
                 return self._send_text(event, self._fmt_list(page_items, page, total, f"🎵 我的收藏（共 {len(items)} 首），回复序号播放：" + "，/song fav del 序号 删除"))

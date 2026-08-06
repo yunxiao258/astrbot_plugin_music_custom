@@ -12,7 +12,7 @@ SEARCH_URL = "https://music.163.com/api/search/get/web"
 DETAIL_URL = "https://music.163.com/api/song/detail"
 LYRIC_URL = "https://music.163.com/api/song/lyric"
 PLAY_URL = "https://music.163.com/api/song/enhance/player/url"
-HOT_URL = "https://music.163.com/api/playlist/detail?id=3778678"
+HOT_URL = "https://music.163.com/api/playlist/detail"
 
 # 热门歌单 ID（云音乐飙升榜/热歌榜等），用于 get_hot
 HOT_PLAYLIST = "3778678"
