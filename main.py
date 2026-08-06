@@ -75,7 +75,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.2.0")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.3.0")
 class MusicPlugin(Star):
     """点歌指令「点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
