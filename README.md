@@ -78,6 +78,12 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 - `queue_limit` / `queue_interval`：队列上限与播放间隔
 - `netease_cookie`：网易云登录 Cookie（可选）。浏览器登录 `music.163.com` 后按 F12 → 应用/Application → Cookie，复制完整 Cookie（需含 `MUSIC_U`）填入；配置后可解锁 VIP 歌曲直链，未配置时 VIP/无版权歌曲自动回退为网页链接
 
+### 网易云登录（解锁 VIP 歌曲）
+
+- `/song login` — 扫码登录（管理员）：自动生成二维码，用手机网易云 App 扫码确认即可
+- `/song login sms 手机号` — 发送短信验证码；`/song login sms 手机号 验证码` — 验证码登录
+- 登录成功后自动保存登录态（写入 `netease_cookie` 并与 WebUI 配置同步），无需手动复制 Cookie
+
 ## 依赖
 
 - 需要 `ffmpeg`（AMR 转码用，自动探测系统 PATH 与常见路径）

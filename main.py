@@ -17,6 +17,13 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
 from .log import get_logger
+from .netease_login import (
+    make_qrcode_image,
+    qrcode_check,
+    qrcode_login_get,
+    sms_login,
+    sms_send,
+)
 from .sources import SourceManager
 from .stats import MusicStats
 from .store import BlockedStore, Favorites, GroupConfigs, PushState, QuotaStore
@@ -81,7 +88,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.4.2")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.0")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -105,6 +112,9 @@ class MusicPlugin(Star):
         self._queue_last: dict[str, float] = {}
         self._queue_task: asyncio.Task | None = None
         self._push_task: asyncio.Task | None = None
+        # 网易云登录：进行中的扫码任务与验证码会话（group_id -> dict）
+        self._login_tasks: dict[str, asyncio.Task] = {}
+        self._sms_sessions: dict[str, dict] = {}
         self._sync_order_aliases()
         # 定期清理缓存目录
         self._cleanup_cache()
@@ -923,10 +933,146 @@ class MusicPlugin(Star):
                     self._ensure_queue_task()
                     return self._send_text(event, "⏭️ 即将播放下一首～")
                 return self._show_queue(event, group_id)
+            m = re.match(r"^/?song\s+login(?:\s+(.+))?$", text, re.S)
+            if m:
+                if not self._is_admin(event):
+                    return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
+                arg = (m.group(1) or "").strip()
+                return await self._do_netease_login(event, arg, user_id, group_id)
             # 帮助
             return self._send_text(event, self._help_text())
         finally:
             event.stop_event()
+
+    async def _do_netease_login(self, event, arg: str, user_id: str, group_id: str) -> MessageEventResult:
+        """网易云登录：/song login（扫码）、/song login sms 手机号（发验证码）、/song login sms 手机号 验证码（登录）"""
+        if not arg:
+            # 扫码登录：生成二维码并后台轮询
+            if group_id in self._login_tasks:
+                return self._send_text(event, "⏳ 已有扫码登录进行中，请先在手机端确认或等待超时～")
+            return await self._start_qrcode_login(event, group_id)
+        m = re.match(r"^sms\s+(\d{5,15})(?:\s+(\d{4,6}))?$", arg, re.S)
+        if not m:
+            return self._send_text(
+                event,
+                "用法：\n/song login — 扫码登录\n/song login sms 手机号 — 发送验证码\n/song login sms 手机号 验证码 — 验证码登录",
+            )
+        phone = m.group(1)
+        captcha = m.group(2)
+        if not captcha:
+            # 发送验证码
+            res = await sms_send(self.sources.session, phone)
+            if res["ok"]:
+                self._sms_sessions[user_id] = {"phone": phone, "ts": time.time()}
+            return self._send_text(event, ("✅ " if res["ok"] else "❌ ") + res["message"])
+        # 验证码登录
+        res = await sms_login(self.sources.session, phone, captcha)
+        if not res["ok"]:
+            return self._send_text(event, "❌ " + res["message"])
+        cookie = res.get("cookie", "")
+        if not cookie:
+            return self._send_text(event, "⚠️ 登录成功但未获取到 Cookie，请重试或改用扫码登录")
+        self._save_netease_cookie(cookie)
+        self._sms_sessions.pop(user_id, None)
+        logger.info(f"[netease-login] 手机号验证码登录成功: {phone}")
+        return self._send_text(event, f"✅ 网易云登录成功（{phone}）！VIP 歌曲直链已解锁～")
+
+    async def _start_qrcode_login(self, event, group_id: str) -> MessageEventResult:
+        """扫码登录：获取 unikey → 生成二维码 → 后台轮询（60 秒 × 5s）"""
+        try:
+            unikey = await qrcode_login_get(self.sources.session)
+        except Exception as e:
+            logger.warning(f"[netease-login] 获取 unikey 失败: {e}")
+            return self._send_text(event, f"❌ 获取二维码失败：{e}")
+        qr_url = f"https://music.163.com/login?codekey={unikey}"
+        try:
+            png = make_qrcode_image(qr_url)
+            img = Image.fromBytes(png)
+        except Exception as e:
+            logger.warning(f"[netease-login] 生成二维码失败: {e}")
+            return self._send_text(event, f"❌ 生成二维码失败：{e}")
+
+        async def _poll():
+            await asyncio.sleep(1)
+            deadline = time.time() + 60
+            last_msg = ""
+            while time.time() < deadline:
+                try:
+                    res = await qrcode_check(self.sources.session, unikey)
+                except Exception as e:
+                    logger.warning(f"[netease-login] 轮询异常: {e}")
+                    await asyncio.sleep(5)
+                    continue
+                code = res.get("code")
+                if code == 800:
+                    await event.send(MessageChain([Plain("⏳ 二维码已过期，请重新发送 /song login 获取新二维码～")]))
+                    return
+                if code == 802:
+                    msg = "📱 已扫码！请在手机上确认登录～"
+                elif code == 801:
+                    msg = ""
+                elif code == 803:
+                    cookies = res.get("cookies") or []
+                    if not cookies:
+                        await event.send(MessageChain([Plain("⚠️ 扫码成功但未获取到 Cookie，请重试")]))
+                        return
+                    self._save_netease_cookie("; ".join(cookies))
+                    await event.send(MessageChain([Plain("✅ 网易云扫码登录成功！VIP 歌曲直链已解锁～")]))
+                    logger.info("[netease-login] 扫码登录成功")
+                    return
+                else:
+                    await asyncio.sleep(5)
+                    continue
+                if msg and msg != last_msg:
+                    await event.send(MessageChain([Plain(msg)]))
+                    last_msg = msg
+                await asyncio.sleep(5)
+            await event.send(MessageChain([Plain("⏳ 扫码登录超时，请重新发送 /song login 获取新二维码～")]))
+
+        self._login_tasks[group_id] = asyncio.create_task(_poll())
+        self._login_tasks[group_id].add_done_callback(
+            lambda _t: self._login_tasks.pop(group_id, None)
+        )
+        chain = MessageChain(
+            [Plain("📱 请使用手机网易云 App 扫码登录（60 秒内有效，登录后 VIP 歌曲直链自动解锁）：\n"), img]
+        )
+        return event.chain_result(chain)
+
+    def _save_netease_cookie(self, cookie: str) -> None:
+        """保存登录 Cookie 到配置并重建源"""
+        # 仅保留关键字段，避免冗余
+        keep = {"MUSIC_U", "__csrf", "NMTID", "MUSIC_A"}
+        parts = [c.strip() for c in cookie.split(";") if "=" in c]
+        kept = []
+        for p in parts:
+            k = p.split("=", 1)[0].strip()
+            if not k:
+                continue
+            if k in keep or not kept:
+                kept.append(p)
+        cookie_str = "; ".join(kept)
+        self.config["netease_cookie"] = cookie_str
+        try:
+            self.sources.reload()
+        except Exception as e:
+            logger.warning(f"[netease-login] reload 源失败: {e}")
+        # 尝试持久化到插件配置文件（WebUI 也能看到）
+        try:
+            import json as _json
+
+            cfg_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "astrbot_plugin_music_custom_config.json"
+            )
+            cfg_path = os.path.normpath(cfg_path)
+            if os.path.isfile(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                data["netease_cookie"] = cookie_str
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    _json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info("[netease-login] Cookie 已持久化到配置文件")
+        except Exception as e:
+            logger.warning(f"[netease-login] Cookie 持久化失败（重启后可能丢失）: {e}")
 
     async def _do_set(self, event, key: str, value, group_id: str, per_group: bool) -> MessageEventResult:
         """设置配置（全局 / 群级）"""
@@ -980,6 +1126,8 @@ class MusicPlugin(Star):
             "/song block 词 / unblock 词 / blocks — 屏蔽管理（管理员）\n"
             "/song set 键 值 — 全局配置（管理员）\n"
             "/song gset 键 值 — 本群配置（管理员，/song greset 还原）\n"
+            "/song login — 网易云扫码登录（解锁 VIP 直链，管理员）\n"
+            "/song login sms 手机号 — 发送短信验证码；/song login sms 手机号 验证码 — 验证码登录\n"
             "可配置键: " + ", ".join(ADMIN_KEYS)
         )
 
@@ -988,6 +1136,9 @@ class MusicPlugin(Star):
         try:
             if self.stats is not None:
                 self.stats.save()
+            for task in list(self._login_tasks.values()):
+                if not task.done():
+                    task.cancel()
             for task in (self._queue_task, self._push_task):
                 if task is not None and not task.done():
                     task.cancel()
