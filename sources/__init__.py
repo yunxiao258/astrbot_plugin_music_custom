@@ -65,7 +65,7 @@ class SourceManager:
             order = list(DEFAULT_ORDER)
         self._order = order
         self._apply_proxy()
-        self._sources = {name: ALL_SOURCES[name](self.session) for name in order}
+        self._sources = {name: ALL_SOURCES[name](self.session, config=self.config) for name in order}
         logger.debug(f"音乐源已加载: {self._order}")
 
     @property

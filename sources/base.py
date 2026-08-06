@@ -35,9 +35,10 @@ class MusicSource:
     name = "base"
     display_name = "未知源"
 
-    def __init__(self, session) -> None:
-        """session 为共享 requests.Session"""
+    def __init__(self, session, config: dict | None = None) -> None:
+        """session 为共享 requests.Session；config 为插件全局配置"""
         self.session = session
+        self.config = config or {}
 
     async def search(self, keyword: str, limit: int = 5) -> list[MusicItem]:
         """搜索歌曲，返回统一 MusicItem 列表"""

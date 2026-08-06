@@ -105,5 +105,11 @@
     "description": "语音转码缓存目录大小上限（MB，超出自动清理最旧文件）",
     "type": "int",
     "default": 200
+  },
+  "netease_cookie": {
+    "description": "网易云登录 Cookie（解锁 VIP 歌曲直链，可选）",
+    "type": "string",
+    "default": "",
+    "hint": "浏览器登录 music.163.com 后 F12 → Application → Cookies 复制完整 Cookie（需含 MUSIC_U），粘贴到此处。留空则 VIP/无版权歌曲自动回退为链接。"
   }
 }

@@ -64,6 +64,7 @@ ADMIN_KEYS = {
     "hot_push_groups": "推送目标群号（逗号分隔）",
     "hot_push_platform": "推送平台 ID（默认 onebot）",
     "cache_max_mb": "语音缓存上限 MB",
+    "netease_cookie": "网易云登录 Cookie（浏览器登录 music.163.com 后复制，含 MUSIC_U；可解锁 VIP 歌曲直链）",
 }
 
 RANDOM_KEYWORDS = ["热门", "经典", "2024", "抖音", "古风", "翻唱", "纯音乐", "BGM", "粤语", "民谣"]
@@ -80,7 +81,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.4.1")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.4.2")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -319,10 +320,10 @@ class MusicPlugin(Star):
             pass
 
     def _build_card(self, item) -> list:
-        """QQ 音乐卡片 + 封面 + 链接文本（组件列表）"""
+        """QQ 音乐卡片（仅 qqmusic 源）+ 封面 + 链接文本（组件列表）"""
         segs = []
         qqsrc = self.sources.get("qqmusic")
-        if self._cfg("enable_card", True) and qqsrc is not None:
+        if item.source == "qqmusic" and self._cfg("enable_card", True) and qqsrc is not None:
             try:
                 card = qqsrc.get_card(item)
                 if card is not None:
@@ -336,6 +337,9 @@ class MusicPlugin(Star):
                 pass
         if item.url and item.url.startswith("http"):
             segs.append(Plain(f"🎵 {item.title} - {item.artist}\n链接: {item.url}"))
+        elif item.source == "netease" and item.id.isdigit():
+            # 网易云 VIP/无版权歌曲拿不到直链：补网页链接兜底，点开可试听
+            segs.append(Plain(f"🎵 {item.title} - {item.artist}\n链接: https://music.163.com/song?id={item.id}"))
         return segs
 
     # ---------- 播放主流程 ----------
@@ -940,7 +944,7 @@ class MusicPlugin(Star):
             self.groups.set_key(group_id, key, value)
             return self._send_text(event, f"✅ 已设置本群 {key} = {value}（/song greset {key} 还原）")
         self.config[key] = value
-        if key == "sources":
+        if key in ("sources", "netease_cookie"):
             self.sources.reload()
         if key == "aliases":
             self._sync_order_aliases()

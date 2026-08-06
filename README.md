@@ -53,7 +53,7 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 
 | 源 | 说明 |
 | --- | --- |
-| netease | 网易云音乐（搜索 + 直链 + 热门 + 链接解析 + 歌词搜索/歌词） |
+| netease | 网易云音乐（搜索 + 直链（免费歌曲）+ 热门 + 链接解析 + 歌词搜索/歌词；VIP 歌曲回退链接） |
 | kuwo | 酷我音乐（搜索 + 直链 + 热门） |
 | kugou | 酷狗音乐（搜索；播放接口有风控，通常回退） |
 | qqmusic | QQ音乐（搜索 + 链接解析；语音直链易风控，主要用于卡片） |
@@ -76,6 +76,7 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 - `enable_card`：是否发送 QQ 音乐卡片
 - `frequency_seconds`：每人点歌冷却秒数
 - `queue_limit` / `queue_interval`：队列上限与播放间隔
+- `netease_cookie`：网易云登录 Cookie（可选）。浏览器登录 `music.163.com` 后按 F12 → 应用/Application → Cookie，复制完整 Cookie（需含 `MUSIC_U`）填入；配置后可解锁 VIP 歌曲直链，未配置时 VIP/无版权歌曲自动回退为网页链接
 
 ## 依赖
 

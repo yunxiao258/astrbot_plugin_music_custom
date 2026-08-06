@@ -11,7 +11,7 @@ logger = get_logger()
 SEARCH_URL = "https://music.163.com/api/search/get/web"
 DETAIL_URL = "https://music.163.com/api/song/detail"
 LYRIC_URL = "https://music.163.com/api/song/lyric"
-OUTER_URL = "http://music.163.com/song/media/outer/url?id={}.mp3"
+PLAY_URL = "https://music.163.com/api/song/enhance/player/url"
 HOT_URL = "https://music.163.com/api/playlist/detail?id=3778678"
 
 # 热门歌单 ID（云音乐飙升榜/热歌榜等），用于 get_hot
@@ -36,16 +36,20 @@ def _parse_song(s: dict) -> MusicItem:
 
 
 class NeteaseSource(MusicSource):
-    """网易云：搜索接口 + outer 直链播放（免登录）"""
+    """网易云：明文搜索接口 + enhance/player/url 播放直链（配置登录 Cookie 可解锁 VIP）"""
 
     name = "netease"
     display_name = "网易云"
 
     def _headers(self) -> dict:
-        """网易云搜索/详情接口请求头（含 Referer/Cookie，降低风控概率）"""
+        """网易云接口请求头：合并配置中的登录 Cookie（MUSIC_U）以解锁 VIP 直链"""
+        cookie = str(self.config.get("netease_cookie", "") or "").strip()
+        base = "os=pc; appver=2.2.16; NMTID=00000000000000000000000000000000"
+        if cookie:
+            base += "; " + cookie.strip().rstrip(";")
         return {
             "Referer": "https://music.163.com/",
-            "Cookie": "os=pc; appver=2.2.16; NMTID=00000000000000000000000000000000",
+            "Cookie": base,
             "X-Real-IP": "",
         }
 
@@ -130,8 +134,37 @@ class NeteaseSource(MusicSource):
         return "\n".join(lines)
 
     async def get_media_url(self, item: MusicItem, quality: str = "standard") -> str:
-        """网易云 outer 直链：无效 ID 会返回 404，调用方需校验"""
-        return OUTER_URL.format(item.id)
+        """网易云 enhance/player/url 明文接口：免费歌曲直链；配置登录 Cookie 后 VIP 也可获取"""
+        br_map = {"super": 320000, "high": 192000, "low": 128000}
+        br = br_map.get(quality, 128000)
+
+        def _do():
+            r = self.session.get(
+                PLAY_URL,
+                params={"ids": f"[{item.id}]", "br": br},
+                headers=self._headers(),
+                timeout=12,
+            )
+            return r.json()
+
+        try:
+            j = await asyncio.to_thread(_do)
+        except Exception as e:
+            logger.warning(f"[netease] 获取播放地址异常 {item.id}: {e}")
+            return ""
+        d = (j.get("data") or [])
+        if not d:
+            logger.warning(f"[netease] 播放地址接口无数据: {item.id}, code={j.get('code')}")
+            return ""
+        url = d[0].get("url") or ""
+        if url.startswith("http"):
+            return url
+        # 无版权/未登录拿不到直链，返回空由调用方回退卡片/换源
+        logger.warning(
+            f"[netease] 无可用播放地址: {item.title} - {item.artist}, code={d[0].get('code')}"
+            f"{'' if self.config.get('netease_cookie') else '（未配置登录 Cookie，VIP 歌曲可能无法获取）'}"
+        )
+        return ""
 
     async def get_hot(self, limit: int = 5) -> list[MusicItem]:
         def _do():
