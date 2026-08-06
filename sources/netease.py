@@ -25,14 +25,19 @@ def _parse_song(s: dict) -> MusicItem:
     """从网易云歌曲 JSON 构造 MusicItem"""
     if not isinstance(s, dict):
         return MusicItem(source="netease", id="", title="", artist="")
-    artists = ", ".join(a.get("name", "") for a in s.get("artists") or [])
+    # artists 字段可能是 list[dict]，异常时直接当字符串（接口结构变化兜底）
+    ar = s.get("artists")
+    if isinstance(ar, list):
+        artists = ", ".join(a.get("name", "") for a in ar if isinstance(a, dict))
+    else:
+        artists = str(ar or "")
     return MusicItem(
         source="netease",
         id=str(s.get("id", "")),
         title=s.get("name", ""),
         artist=artists,
-        album=(s.get("album") or {}).get("name", ""),
-        duration=int(s.get("duration", 0)) // 1000,
+        album=(s.get("album") or {}).get("name", "") if isinstance(s.get("album"), dict) else "",
+        duration=int(s.get("duration", 0) or 0) // 1000,
         artwork=(s.get("album") or {}).get("picUrl", "") or "",
     )
 
@@ -189,26 +194,14 @@ class NeteaseSource(MusicSource):
             return r.json()
 
         j = await asyncio.to_thread(_do)
+        if not isinstance(j, dict):
+            return []
         tracks = ((j.get("result") or {}).get("tracks")) or []
         if not tracks:
             logger.warning(
                 f"[netease] 热门榜单获取为空, code={j.get('code')}, message={j.get('message', '')}"
             )
-        items = []
-        for s in tracks[:limit]:
-            artists = ", ".join(a.get("name", "") for a in s.get("artists") or [])
-            items.append(
-                MusicItem(
-                    source=self.name,
-                    id=str(s.get("id", "")),
-                    title=s.get("name", ""),
-                    artist=artists,
-                    album=(s.get("album") or {}).get("name", ""),
-                    duration=int(s.get("duration", 0)) // 1000,
-                    artwork=(s.get("album") or {}).get("picUrl", "") or "",
-                )
-            )
-        return items
+        return [_parse_song(s) for s in tracks[:limit]]
 
     async def parse_share(self, text: str) -> MusicItem | None:
         """解析网易云分享链接 → 歌曲"""
@@ -233,17 +226,9 @@ class NeteaseSource(MusicSource):
         except Exception as e:
             logger.warning(f"[netease] 解析链接失败 {song_id}: {e}")
             return None
+        if not isinstance(j, dict):
+            return None
         songs = j.get("songs") or []
         if not songs:
             return None
-        s = songs[0]
-        artists = ", ".join(a.get("name", "") for a in s.get("artists") or [])
-        return MusicItem(
-            source=self.name,
-            id=str(s.get("id", song_id)),
-            title=s.get("name", "网易云歌曲"),
-            artist=artists,
-            album=(s.get("album") or {}).get("name", ""),
-            duration=int(s.get("duration", 0)) // 1000,
-            artwork=(s.get("album") or {}).get("picUrl", "") or "",
-        )
+        return _parse_song(songs[0])
