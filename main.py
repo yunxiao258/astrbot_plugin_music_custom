@@ -14,6 +14,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.message_components import Image, Music, Plain, Record
 from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
+from astrbot.core.star.filter.command import GreedyStr
 
 from .log import get_logger
 from .sources import SourceManager
@@ -23,8 +24,9 @@ from .voice import convert_to_amr, download_audio
 
 logger = get_logger()
 
-# 点歌触发指令（支持别名与中英文冒号/空格分隔）
-ORDER_PATTERN = re.compile(r"^(?:点歌|点歌姬|来首歌|放首歌|来首|放首|/点歌)[\s:：]*(.*)$", re.S)
+# 点歌标准指令名（强制以 / 前缀触发，需 @机器人 或唤醒词，见 README）
+ORDER_COMMAND = "/点歌"
+DEFAULT_ORDER_ALIASES = set()
 # 序号选择
 SELECT_PATTERN = re.compile(r"^\s*(\d{1,2})\s*$")
 # URL 链接
@@ -51,7 +53,7 @@ ADMIN_KEYS = {
     "admins": "额外管理员QQ（逗号分隔）",
     "quality": "默认音质：standard/high/low",
     "daily_limit": "每人每日点歌次数上限（0=不限）",
-    "aliases": "自定义点歌指令别名（逗号分隔）",
+    "aliases": "自定义点歌指令别名（必须以 / 开头，逗号分隔）",
     "enable_artwork": "是否显示封面图",
     "enable_lyric": "是否附带歌词",
     "hot_push_enable": "是否开启定时热门推送",
@@ -75,9 +77,9 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.3.0")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.4.0")
 class MusicPlugin(Star):
-    """点歌指令「点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
+    """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -99,7 +101,7 @@ class MusicPlugin(Star):
         self._queue_last: dict[str, float] = {}
         self._queue_task: asyncio.Task | None = None
         self._push_task: asyncio.Task | None = None
-        self._order_re = self._build_order_re()
+        self._sync_order_aliases()
         # 定期清理缓存目录
         self._cleanup_cache()
         logger.info("【CUSTOM-MUSIC】插件初始化完成")
@@ -114,12 +116,33 @@ class MusicPlugin(Star):
                 return v
         return self.config.get(key, default)
 
-    def _build_order_re(self) -> re.Pattern:
-        """根据 aliases 配置构建点歌指令正则"""
-        aliases = str(self._cfg("aliases", "")).replace("，", ",").strip()
-        extra = [a.strip() for a in aliases.split(",") if a.strip()]
-        parts = list(ORDER_PATTERN.pattern)[:0] or ["点歌", "点歌姬", "来首歌", "放首歌", "来首", "放首", "/点歌"] + extra
-        return re.compile(r"^(?:" + "|".join(re.escape(p) for p in parts) + r")[\s:：]*(.*)$", re.S)
+    def _sync_order_aliases(self) -> None:
+        """将 aliases 配置合并进标准指令的别名集合（装饰器静态注册的 CommandFilter）"""
+        try:
+            from astrbot.core.star.filter.command import CommandFilter
+            from astrbot.core.star.star_handler import (
+                EventType,
+                star_handlers_registry,
+            )
+
+            aliases = str(self._cfg("aliases", "")).replace("，", ",").strip()
+            extra = {a.strip() for a in aliases.split(",") if a.strip()}
+            for md in star_handlers_registry.get_handlers_by_event_type(
+                EventType.AdapterMessageEvent,
+                plugins_name=None,
+            ):
+                if (
+                    md.handler_module_path != "astrbot_plugin_music_custom.main"
+                    or md.handler_name != "order_music"
+                ):
+                    continue
+                for f in md.event_filters:
+                    if isinstance(f, CommandFilter) and f.command_name == ORDER_COMMAND:
+                        f.alias.update(extra)
+                        f._cmpl_cmd_names = None
+                        break
+        except Exception as e:
+            logger.warning(f"同步点歌指令别名失败: {e}")
 
     def _is_admin(self, event) -> bool:
         try:
@@ -206,7 +229,7 @@ class MusicPlugin(Star):
             tag = src.display_name if src else it.source
             lines.append(f"{i}. {it.display}（{tag}）")
         if total_pages > 1:
-            lines.append(f"— 第 {page}/{total_pages} 页，发「点歌 下一页」翻页 —")
+            lines.append(f"— 第 {page}/{total_pages} 页，发「/点歌 下一页」翻页 —")
         return "\n".join(lines)
 
     def _ensure_queue_task(self):
@@ -674,7 +697,7 @@ class MusicPlugin(Star):
         lines = ["🎶 每日热门点歌推荐 Top 5:"]
         for i, it in enumerate(items[:5], 1):
             lines.append(f"{i}. {it.title} - {it.artist}")
-        lines.append("回复「点歌 序号」即可点歌～")
+        lines.append("回复「/点歌 序号」即可点歌～")
         chain = MessageChain([Plain("\n".join(lines))])
         for gid in groups:
             key = f"{today}:{gid}"
@@ -691,13 +714,14 @@ class MusicPlugin(Star):
 
     # ---------- 指令 ----------
 
-    @filter.regex(ORDER_PATTERN, priority=220)
-    async def order_music(self, event: AstrMessageEvent) -> MessageEventResult | None:
-        """点歌主入口：点歌 [歌名|随机|热门|统计|收藏|排队|链接|歌词|高清|下一页]"""
-        m = self._order_re.search(event.message_str)
-        if not m:
-            return None
-        kw = m.group(1).strip().strip("，。！？!?")
+    @filter.command(ORDER_COMMAND, alias=set(DEFAULT_ORDER_ALIASES), priority=1000)
+    async def order_music(
+        self,
+        event: AstrMessageEvent,
+        song_name: GreedyStr,
+    ) -> MessageEventResult | None:
+        """点歌主入口：点歌 [歌名|随机|热门|统计|收藏|排队|链接|歌词|高清|下一页]（标准指令，需 @机器人或唤醒词）"""
+        kw = song_name.strip().strip("，。！？!?")
         group_id = str(event.get_group_id() or "")
         try:
             if not kw or kw in ("随机", "随便", "来一首"):
@@ -744,11 +768,11 @@ class MusicPlugin(Star):
         group_id = str(event.get_group_id() or "private")
         pending = self._pending.get(group_id)
         if not pending:
-            return self._send_text(event, "当前没有进行中的选歌列表，发「点歌 歌名」开始吧～")
+            return self._send_text(event, "当前没有进行中的选歌列表，发「/点歌 歌名」开始吧～")
         user_id = str(event.get_sender_id())
         sess = pending.get(user_id)
         if not sess:
-            return self._send_text(event, "你当前没有选歌列表，发「点歌 歌名」开始吧～")
+            return self._send_text(event, "你当前没有选歌列表，发「/点歌 歌名」开始吧～")
         try:
             if time.time() - sess["ts"] > int(self._cfg("select_timeout", 30, group_id)):
                 self._pending.pop(group_id, None)
@@ -872,7 +896,7 @@ class MusicPlugin(Star):
                     return self._send_text(event, "✅ 已删除该收藏" if ok else "❌ 序号不对哦，/song fav 查看你的收藏")
                 items = self._fav_items(user_id)
                 if not items:
-                    return self._send_text(event, "你还没有收藏。发「点歌 收藏 歌名」试试～")
+                    return self._send_text(event, "你还没有收藏。发「/点歌 收藏 歌名」试试～")
                 self._pending.setdefault(group_id, {})[user_id] = {
                     "mode": "favlist", "items": items, "page": 1, "ts": time.time(), "kw": "收藏", "quality": "",
                 }
@@ -915,7 +939,7 @@ class MusicPlugin(Star):
         if key == "sources":
             self.sources.reload()
         if key == "aliases":
-            self._order_re = self._build_order_re()
+            self._sync_order_aliases()
         if key in ("hot_push_enable", "hot_push_time", "hot_push_groups"):
             self._ensure_push_task()
         return self._send_text(event, f"✅ 已更新全局 {key} = {value}（重启后若想保留请同步修改 WebUI 配置）")
@@ -923,7 +947,7 @@ class MusicPlugin(Star):
     def _show_queue(self, event, group_id: str) -> MessageEventResult:
         q = self._queues.get(group_id) or []
         if not q:
-            return self._send_text(event, "队列是空的。发「点歌 排队 歌名」加入队列～")
+            return self._send_text(event, "队列是空的。发「/点歌 排队 歌名」加入队列～")
         lines = [f"🎧 本群播放队列（{len(q)} 首）:"]
         for i, e in enumerate(q, 1):
             it = e["item"]
@@ -934,12 +958,13 @@ class MusicPlugin(Star):
     def _help_text(self) -> str:
         return (
             "🎵 点歌插件使用说明\n"
-            "点歌 歌名 — 搜索点歌（回复序号播放，发「点歌 下一页」翻页）\n"
-            "点歌 随机 / 热门 / 统计 — 随机、榜单、统计\n"
-            "点歌 统计 周/月/我/人/群 — 周榜/月榜/我的最爱/点歌达人/群内排行\n"
-            "点歌 歌词 片段 — 按歌词搜索\n"
-            "点歌 高清 歌名 — 高音质搜索\n"
-            "点歌 收藏 歌名 / 点歌 排队 歌名 — 搜索后收藏/加入队列\n"
+            "使用方式：发送「/点歌 歌名」（需 @机器人 或唤醒词）\n"
+            "/点歌 歌名 — 搜索点歌（回复序号播放，发「/点歌 下一页」翻页）\n"
+            "/点歌 随机 / 热门 / 统计 — 随机、榜单、统计\n"
+            "/点歌 统计 周/月/我/人/群 — 周榜/月榜/我的最爱/点歌达人/群内排行\n"
+            "/点歌 歌词 片段 — 按歌词搜索\n"
+            "/点歌 高清 歌名 — 高音质搜索\n"
+            "/点歌 收藏 歌名 / 点歌 排队 歌名 — 搜索后收藏/加入队列\n"
             "粘贴音乐链接 — 网易云/QQ音乐/B站 直解析播放\n"
             "回复「取消」— 退出当前选歌\n"
             "/song fav — 查看收藏（回复序号播放，/song fav del 序号 删除）\n"

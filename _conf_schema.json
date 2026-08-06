@@ -67,7 +67,7 @@
     "default": 0
   },
   "aliases": {
-    "description": "自定义点歌指令别名（逗号分隔，如：点播,来一曲）",
+    "description": "自定义点歌指令别名（必须以 / 开头，逗号分隔，如：/点歌吧,/来一首）",
     "type": "string",
     "default": ""
   },
