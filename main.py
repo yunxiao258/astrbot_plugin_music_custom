@@ -1,4 +1,4 @@
-"""AstrBot 群聊点歌插件：多音乐源聚合搜索、语音/卡片发送、选歌交互、统计、收藏、播放队列、链接解析、群独立配置"""
+﻿"""AstrBot 群聊点歌插件：多音乐源聚合搜索、语音/卡片发送、选歌交互、统计、收藏、播放队列、链接解析、群独立配置"""
 
 import asyncio
 import math
@@ -24,8 +24,11 @@ from .voice import convert_to_amr, download_audio
 
 logger = get_logger()
 
-# 点歌标准指令名（强制以 / 前缀触发，需 @机器人 或唤醒词，见 README）
-ORDER_COMMAND = "/点歌"
+# 点歌标准指令名。
+# 注意：部署环境的 AstrBot wake_prefix 为 "/"，消息前缀会在唤醒阶段被剥离，
+# 因此这里注册剥离后的形式 "点歌"（用户实际发送 "/点歌 xxx"）。
+# 群聊中不带 "/" 的 "点歌 xxx" 无法唤醒机器人，CommandFilter 不会触发，天然保证必须用 "/"。
+ORDER_COMMAND = "点歌"
 DEFAULT_ORDER_ALIASES = set()
 # 序号选择
 SELECT_PATTERN = re.compile(r"^\s*(\d{1,2})\s*$")
@@ -77,7 +80,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.4.0")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.4.1")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -126,7 +129,8 @@ class MusicPlugin(Star):
             )
 
             aliases = str(self._cfg("aliases", "")).replace("，", ",").strip()
-            extra = {a.strip() for a in aliases.split(",") if a.strip()}
+            # 与唤醒阶段一致：注册剥离 "/" 前缀后的别名（用户实际发送 "/别名"）
+            extra = {a.strip().lstrip("/") for a in aliases.split(",") if a.strip()}
             for md in star_handlers_registry.get_handlers_by_event_type(
                 EventType.AdapterMessageEvent,
                 plugins_name=None,
@@ -843,31 +847,31 @@ class MusicPlugin(Star):
         finally:
             event.stop_event()
 
-    @filter.command("/song", priority=210)
+    @filter.command("song", priority=210)
     async def song_admin(self, event: AstrMessageEvent) -> MessageEventResult:
-        """/song 子命令：set / gset / greset / fav / queue / block / help"""
+        """/song 子命令：set / gset / greset / fav / queue / block / help（用户发送 /song，前缀 / 由唤醒阶段剥离）"""
         try:
             text = event.message_str.strip()
             group_id = str(event.get_group_id() or "private")
             user_id = str(event.get_sender_id())
-            m = re.match(r"^/song\s+set\s+([\w_]+)\s+(.+)$", text, re.S)
+            m = re.match(r"^/?song\s+set\s+([\w_]+)\s+(.+)$", text, re.S)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
                 return await self._do_set(event, m.group(1), m.group(2), group_id, per_group=False)
-            m = re.match(r"^/song\s+gset\s+([\w_]+)\s+(.+)$", text, re.S)
+            m = re.match(r"^/?song\s+gset\s+([\w_]+)\s+(.+)$", text, re.S)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
                 return await self._do_set(event, m.group(1), m.group(2), group_id, per_group=True)
-            m = re.match(r"^/song\s+greset(?:\s+([\w_]+))?$", text)
+            m = re.match(r"^/?song\s+greset(?:\s+([\w_]+))?$", text)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
                 key = m.group(1)
                 ok = self.groups.reset_key(group_id, key)
                 return self._send_text(event, f"✅ 已清除本群配置{'「' + key + '」' if key else ''}" if ok else f"本群没有{'该' if key else '任何'}群配置")
-            m = re.match(r"^/song\s+block\s+(.+)$", text, re.S)
+            m = re.match(r"^/?song\s+block\s+(.+)$", text, re.S)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
@@ -875,7 +879,7 @@ class MusicPlugin(Star):
                 if self.blocked.block(term):
                     return self._send_text(event, f"⛔ 已屏蔽词「{term}」（匹配歌曲标题/歌手）")
                 return self._send_text(event, f"「{term}」已在屏蔽列表中")
-            m = re.match(r"^/song\s+unblock\s+(.+)$", text, re.S)
+            m = re.match(r"^/?song\s+unblock\s+(.+)$", text, re.S)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
@@ -883,13 +887,13 @@ class MusicPlugin(Star):
                 if self.blocked.unblock(term):
                     return self._send_text(event, f"✅ 已解除屏蔽「{term}」")
                 return self._send_text(event, f"「{term}」不在屏蔽列表中")
-            m = re.match(r"^/song\s+blocks?$", text)
+            m = re.match(r"^/?song\s+blocks?$", text)
             if m:
                 terms = self.blocked.list()
                 if not terms:
                     return self._send_text(event, "当前没有屏蔽词。/song block 词 添加")
                 return self._send_text(event, "⛔ 屏蔽词列表:\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(terms, 1)))
-            m = re.match(r"^/song\s+fav(?:\s+del\s+(\d{1,2}))?$", text)
+            m = re.match(r"^/?song\s+fav(?:\s+del\s+(\d{1,2}))?$", text)
             if m:
                 if m.group(1):
                     ok = self.favs.remove(user_id, int(m.group(1)))
@@ -902,7 +906,7 @@ class MusicPlugin(Star):
                 }
                 page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
                 return self._send_text(event, self._fmt_list(page_items, page, total, f"🎵 我的收藏（共 {len(items)} 首），回复序号播放：" + "，/song fav del 序号 删除"))
-            m = re.match(r"^/song\s+queue(?:\s+(\w+))?$", text)
+            m = re.match(r"^/?song\s+queue(?:\s+(\w+))?$", text)
             if m:
                 sub = m.group(1)
                 if sub == "clear":
