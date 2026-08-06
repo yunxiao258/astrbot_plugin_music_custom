@@ -5,7 +5,10 @@ import json
 import re
 import time
 
+from ..log import get_logger
 from .base import MusicItem, MusicSource
+
+logger = get_logger()
 
 SEARCH_URL = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
 VKEY_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
@@ -25,20 +28,35 @@ class QQMusicSource(MusicSource):
     def supports_card(self) -> bool:
         return True
 
+    def _headers(self) -> dict:
+        """QQ 音乐接口请求头（带 Referer + 基础 Cookie，降低风控概率）"""
+        return {
+            "Referer": "https://y.qq.com/",
+            "Origin": "https://y.qq.com",
+            "Cookie": "pgv_pvid=0000000000000000; pgv_info=ssid=s0000000000; ts_uid=0;",
+            "Accept-Charset": "utf-8",
+        }
+
     async def search(self, keyword: str, limit: int = 5) -> list[MusicItem]:
         def _do():
             r = self.session.get(
                 SEARCH_URL,
                 params={"p": 1, "n": limit, "w": keyword, "format": "json", "cr": 1},
+                headers=self._headers(),
                 timeout=12,
             )
             return r.json()
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[qqmusic] 搜索「{keyword}」请求异常: {e}")
             return []
         songs = ((j.get("data") or {}).get("song") or {}).get("list") or []
+        if not songs:
+            logger.warning(
+                f"[qqmusic] 搜索「{keyword}」无结果, code={j.get('code')}, msg={j.get('msg', '')}"
+            )
         items = []
         for s in songs:
             mid = s.get("songmid", "")
@@ -72,7 +90,7 @@ class QQMusicSource(MusicSource):
                 },
                 "comm": {"uin": 0, "format": "json", "ct": 24, "cv": 0},
             })
-            r = self.session.get(VKEY_URL, params={"format": "json", "data": data}, timeout=12)
+            r = self.session.get(VKEY_URL, params={"format": "json", "data": data}, headers=self._headers(), timeout=12)
             return r.json()
 
         try:
@@ -81,8 +99,9 @@ class QQMusicSource(MusicSource):
             purl = urls[0].get("purl", "") if urls else ""
             if purl:
                 return "https://dl.stream.qqmusic.qq.com/" + purl
-        except Exception:
-            pass
+            logger.warning(f"[qqmusic] 获取 vkey 直链失败（可能被风控）: {item.title}")
+        except Exception as e:
+            logger.warning(f"[qqmusic] 获取 vkey 直链异常: {e}")
         return ""
 
     def get_card(self, item: MusicItem) -> dict:
@@ -109,13 +128,15 @@ class QQMusicSource(MusicSource):
             r = self.session.get(
                 DETAIL_URL,
                 params={"songmid": mid, "format": "json", "inCharset": "utf8", "outCharset": "utf8"},
+                headers=self._headers(),
                 timeout=12,
             )
             return r.json()
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[qqmusic] 解析链接失败 {mid}: {e}")
             return None
         song = ((j.get("data") or [None]))[0] if j.get("data") else None
         if not song:

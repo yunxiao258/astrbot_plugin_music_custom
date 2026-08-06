@@ -5,6 +5,12 @@
     "default": "netease,kuwo,kugou,qqmusic,bilibili",
     "hint": "留空表示全部启用"
   },
+  "proxy": {
+    "description": "HTTP 代理地址（如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080），留空不使用代理",
+    "type": "string",
+    "default": "",
+    "hint": "服务器/云主机建议配置国内代理，可绕过网易云/QQ音乐对 IDC 出口 IP 的风控"
+  },
   "search_limit": {
     "description": "搜索结果条数",
     "type": "int",

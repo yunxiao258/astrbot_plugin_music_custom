@@ -8,17 +8,20 @@ import re
 import time
 import unicodedata
 
-from astrbot.api import AstrBotConfig, logger
+from astrbot.api import AstrBotConfig
 from astrbot.api.all import MessageChain, MessageEventResult
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.message_components import Image, Music, Plain, Record
 from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
 
+from .log import get_logger
 from .sources import SourceManager
 from .stats import MusicStats
 from .store import BlockedStore, Favorites, GroupConfigs, PushState, QuotaStore
 from .voice import convert_to_amr, download_audio
+
+logger = get_logger()
 
 # 点歌触发指令（支持别名与中英文冒号/空格分隔）
 ORDER_PATTERN = re.compile(r"^(?:点歌|点歌姬|来首歌|放首歌|来首|放首|/点歌)[\s:：]*(.*)$", re.S)
@@ -328,11 +331,17 @@ class MusicPlugin(Star):
         for q in _QUALITY_CHAIN.get(quality, ["standard"]):
             url = await self.sources.first_media_url(item, quality=q)
             if url:
+                logger.info(f"[music] 播放地址获取成功（{q}）: {item.title} - {item.artist}")
                 break
+        if not url:
+            logger.warning(
+                f"[music] 所有音质均无法获取播放地址，回退卡片/链接: {item.title} - {item.artist}（源: {item.source}）"
+            )
         if url:
             voice_res = await self._try_voice(event, url, item)
             if voice_res is _URL_SENT:
                 # 已直接发送语音：先发点歌人标识，再补歌词
+                logger.info(f"[music] 语音 URL 直发成功: {item.title}")
                 if self._cfg("enable_lyric", True):
                     await event.send(MessageChain([Plain(head)]))
                     await self._send_lyric(event, item)
@@ -342,6 +351,7 @@ class MusicPlugin(Star):
                 return None
             if isinstance(voice_res, Record):
                 # amr 语音已就绪
+                logger.info(f"[music] amr 转码语音发送成功: {item.title}")
                 segs = []
                 if self._cfg("enable_lyric", True):
                     segs.append(Plain(head))
@@ -350,6 +360,7 @@ class MusicPlugin(Star):
                 self._record(event, item, group_id)
                 return event.chain_result(segs)
             # 语音失败走卡片回退（卡片本身可能带封面/链接）
+            logger.warning(f"[music] 语音发送失败，回退卡片/链接: {item.title}")
             chain = self._build_card(item)
         if not chain:
             chain = [Plain(f"⚠️ 歌曲「{item.title}」暂无法获取音频，可换个关键词试试～")]
@@ -406,6 +417,9 @@ class MusicPlugin(Star):
         limit = int(self._cfg("search_limit", 5, group_id))
         kw = keyword
         results = await self.sources.search_all(kw, limit=limit)
+        logger.info(
+            f"[music] 搜索「{kw}」完成，共 {len(results)} 个源返回结果（源: {[n for n, _ in results]}）"
+        )
         # 宽松重搜：无结果且关键词含全角/标点时，归一化后重试
         if not results:
             nk = self._norm(kw)
@@ -433,6 +447,7 @@ class MusicPlugin(Star):
         items = filtered
         if not items:
             tip = f"（已过滤 {blocked_n} 条被屏蔽的结果）" if blocked_n else ""
+            logger.warning(f"[music] 「{kw}」搜索无任何可播放结果")
             return self._send_text(event, f"😢 没有找到相关歌曲{tip}，换个关键词试试？")
         heads = {
             "search": f"找到这些歌曲，回复序号播放{(f"（{hint}）") if hint else ""}：",

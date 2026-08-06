@@ -3,13 +3,19 @@
 import asyncio
 import re
 
+from ..log import get_logger
 from .base import MusicItem, MusicSource
+
+logger = get_logger()
 
 SEARCH_URL = "https://music.163.com/api/search/get/web"
 DETAIL_URL = "https://music.163.com/api/song/detail"
 LYRIC_URL = "https://music.163.com/api/song/lyric"
 OUTER_URL = "http://music.163.com/song/media/outer/url?id={}.mp3"
 HOT_URL = "https://music.163.com/api/playlist/detail?id=3778678"
+
+# 热门歌单 ID（云音乐飙升榜/热歌榜等），用于 get_hot
+HOT_PLAYLIST = "3778678"
 
 # 分享链接：music.163.com/song?id=xxx / #/song?id=xxx / outer/url?id=xxx
 SHARE_RE = re.compile(r"music\.163\.com/(?:#/)?song(?:\?.*?&?id=(\d+)|/media/outer/url\?.*?id=(\d+))", re.I)
@@ -35,31 +41,57 @@ class NeteaseSource(MusicSource):
     name = "netease"
     display_name = "网易云"
 
+    def _headers(self) -> dict:
+        """网易云搜索/详情接口请求头（含 Referer/Cookie，降低风控概率）"""
+        return {
+            "Referer": "https://music.163.com/",
+            "Cookie": "os=pc; appver=2.2.16; NMTID=00000000000000000000000000000000",
+            "X-Real-IP": "",
+        }
+
+    def _sync_search(self, url: str, params: dict, extra_headers: dict | None = None) -> dict:
+        headers = {**self._headers(), **(extra_headers or {})}
+        r = self.session.get(url, params=params, headers=headers, timeout=12)
+        # 请求失败/被风控时打日志
+        if r.status_code != 200:
+            logger.warning(f"[netease] 搜索 HTTP {r.status_code}: {url}")
+            return {}
+        try:
+            return r.json()
+        except Exception as e:
+            logger.warning(f"[netease] 搜索响应解析失败: {e}\n{r.text[:200]}")
+            return {}
+
     async def search(self, keyword: str, limit: int = 5) -> list[MusicItem]:
         def _do():
-            r = self.session.get(
+            return self._sync_search(
                 SEARCH_URL,
-                params={"s": keyword, "type": 1, "limit": limit, "offset": 0},
-                timeout=12,
+                {"s": keyword, "type": 1, "limit": limit, "offset": 0},
             )
-            return r.json()
 
         j = await asyncio.to_thread(_do)
         songs = (j.get("result") or {}).get("songs") or []
+        if not songs:
+            # 记录 code / 空结果原因，方便排查（-460 表示被风控 / 需要验证）
+            logger.warning(
+                f"[netease] 搜索「{keyword}」无结果或为空, code={j.get('code')}, 响应原因={j.get('message', '')}"
+            )
         return [_parse_song(s) for s in songs]
 
     async def search_by_lyric(self, keyword: str, limit: int = 5) -> list[MusicItem]:
         """按歌词片段搜索（网易云 type=1006）"""
         def _do():
-            r = self.session.get(
+            return self._sync_search(
                 SEARCH_URL,
-                params={"s": keyword, "type": 1006, "limit": limit, "offset": 0},
-                timeout=12,
+                {"s": keyword, "type": 1006, "limit": limit, "offset": 0},
             )
-            return r.json()
 
         j = await asyncio.to_thread(_do)
         songs = (j.get("result") or {}).get("songs") or []
+        if not songs:
+            logger.warning(
+                f"[netease] 歌词搜索「{keyword}」无结果, code={j.get('code')}, message={j.get('message', '')}"
+            )
         return [_parse_song(s) for s in songs]
 
     async def get_lyric(self, item: MusicItem, max_lines: int = 4) -> str:
@@ -68,13 +100,15 @@ class NeteaseSource(MusicSource):
             r = self.session.get(
                 LYRIC_URL,
                 params={"id": item.id, "lv": 1, "kv": 1, "tv": -1},
+                headers=self._headers(),
                 timeout=12,
             )
             return r.json()
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[netease] 歌词获取异常 {item.id}: {e}")
             return ""
         lrc = (j.get("lrc") or {}).get("lyric") or ""
         # 元数据前缀（作词/作曲/编曲 等）直接跳过
@@ -101,11 +135,20 @@ class NeteaseSource(MusicSource):
 
     async def get_hot(self, limit: int = 5) -> list[MusicItem]:
         def _do():
-            r = self.session.get(HOT_URL, params={"id": "3778678", "limit": 10}, timeout=12)
+            r = self.session.get(
+                HOT_URL,
+                params={"id": HOT_PLAYLIST, "limit": 10},
+                headers=self._headers(),
+                timeout=12,
+            )
             return r.json()
 
         j = await asyncio.to_thread(_do)
         tracks = ((j.get("result") or {}).get("tracks")) or []
+        if not tracks:
+            logger.warning(
+                f"[netease] 热门榜单获取为空, code={j.get('code')}, message={j.get('message', '')}"
+            )
         items = []
         for s in tracks[:limit]:
             artists = ", ".join(a.get("name", "") for a in s.get("artists") or [])
@@ -132,12 +175,18 @@ class NeteaseSource(MusicSource):
             return None
 
         def _do():
-            r = self.session.get(DETAIL_URL, params={"id": song_id, "ids": f"[{song_id}]"}, timeout=12)
+            r = self.session.get(
+                DETAIL_URL,
+                params={"id": song_id, "ids": f"[{song_id}]"},
+                headers=self._headers(),
+                timeout=12,
+            )
             return r.json()
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[netease] 解析链接失败 {song_id}: {e}")
             return None
         songs = j.get("songs") or []
         if not songs:

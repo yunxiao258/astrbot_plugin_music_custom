@@ -3,7 +3,10 @@
 import asyncio
 import re
 
+from ..log import get_logger
 from .base import MusicItem, MusicSource
+
+logger = get_logger()
 
 SPI_URL = "https://api.bilibili.com/x/frontend/finger/spi"
 SEARCH_URL = "https://api.bilibili.com/x/web-interface/search/type"
@@ -34,13 +37,18 @@ class BilibiliSource(MusicSource):
     def _to_item(self, v: dict) -> MusicItem:
         title = self._clean_title(v.get("title", ""))
         alias = re.search(r"《(.+?)》", title)
+        duration = v.get("duration", 0) or 0
+        if isinstance(duration, str) and ":" in duration:
+            # B 站返回 "mm:ss" 格式时长
+            parts = duration.split(":")
+            duration = int(parts[0]) * 60 + int(parts[1])
         return MusicItem(
             source=self.name,
             id=str(v.get("cid") or v.get("bvid") or v.get("aid") or ""),
             title=title,
             artist=v.get("author") or ((v.get("owner") or {}).get("name", "")),
             album=str(v.get("bvid") or v.get("aid") or ""),
-            duration=int(v.get("duration", 0) or 0),
+            duration=duration,
             artwork=("https:" + v["pic"]) if str(v.get("pic", "")).startswith("//") else (v.get("pic") or ""),
             extra={"aid": v.get("aid"), "bvid": v.get("bvid"), "cid": v.get("cid")},
         )
@@ -68,11 +76,15 @@ class BilibiliSource(MusicSource):
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[bilibili] 搜索「{keyword}」请求异常: {e}")
             return []
         if j.get("code") != 0:
+            logger.warning(f"[bilibili] 搜索「{keyword}」被拒绝, code={j.get('code')}, msg={j.get('message', '')}")
             return []
         results = (j.get("data") or {}).get("result") or []
+        if not results:
+            logger.warning(f"[bilibili] 搜索「{keyword}」无结果")
         return [self._to_item(v) for v in results[:limit]]
 
     async def get_media_url(self, item: MusicItem, quality: str = "standard") -> str:
@@ -83,11 +95,11 @@ class BilibiliSource(MusicSource):
             params = {"bvid": item.extra.get("bvid")} if item.extra.get("bvid") else {"aid": item.extra.get("aid")}
             cid = item.extra.get("cid")
             if not cid:
-                r = self.session.get(VIEW_URL, params=params, timeout=12)
+                r = self.session.get(VIEW_URL, params=params, headers={"referer": "https://www.bilibili.com/"}, timeout=12)
                 cid = (r.json().get("data") or {}).get("cid")
             if not cid:
                 return ""
-            r2 = self.session.get(PLAYURL_URL, params={**params, "cid": cid, "fnval": 16}, timeout=12)
+            r2 = self.session.get(PLAYURL_URL, params={**params, "cid": cid, "fnval": 16}, headers={"referer": "https://www.bilibili.com/"}, timeout=12)
             data = (r2.json().get("data") or {})
             audios = (data.get("dash") or {}).get("audio") or []
             if not audios:
@@ -101,7 +113,14 @@ class BilibiliSource(MusicSource):
                 idx = min(idx, len(audios) - 1)
             return audios[idx]["baseUrl"]
 
-        return await asyncio.to_thread(_do)
+        try:
+            url = await asyncio.to_thread(_do)
+            if not url:
+                logger.warning(f"[bilibili] 播放地址获取失败（可能被风控）: {item.title}")
+            return url
+        except Exception as e:
+            logger.warning(f"[bilibili] 播放地址获取异常: {e}")
+            return ""
 
     async def get_hot(self, limit: int = 5) -> list[MusicItem]:
         """B 站综合热门视频"""
@@ -118,14 +137,20 @@ class BilibiliSource(MusicSource):
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[bilibili] 热门榜单获取异常: {e}")
             return []
         if j.get("code") != 0:
+            logger.warning(f"[bilibili] 热门榜单被拒绝, code={j.get('code')}, msg={j.get('message', '')}")
             return []
         items = []
         for v in (j.get("data") or {}).get("list") or []:
             aid = v.get("aid")
             bvid = v.get("bvid")
+            duration = v.get("duration", 0) or 0
+            if isinstance(duration, str) and ":" in duration:
+                parts = duration.split(":")
+                duration = int(parts[0]) * 60 + int(parts[1])
             items.append(
                 MusicItem(
                     source=self.name,
@@ -133,7 +158,7 @@ class BilibiliSource(MusicSource):
                     title=self._clean_title(v.get("title", "")),
                     artist=((v.get("owner") or {}).get("name", "")),
                     album=str(bvid or aid or ""),
-                    duration=int(v.get("duration", 0) or 0),
+                    duration=duration,
                     artwork=v.get("pic") or "",
                     extra={"aid": aid, "bvid": bvid, "cid": v.get("cid")},
                 )
@@ -155,10 +180,12 @@ class BilibiliSource(MusicSource):
 
         try:
             j = await asyncio.to_thread(_do)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[bilibili] 解析链接请求异常: {e}")
             return None
         v = j.get("data") or {}
         if not v:
+            logger.warning(f"[bilibili] 解析链接无数据: {bvid}")
             return None
         return MusicItem(
             source=self.name,

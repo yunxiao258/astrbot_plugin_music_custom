@@ -61,6 +61,7 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 见 `_conf_schema.json`。关键项：
 
 - `sources`：启用源，逗号分隔
+- `proxy`：HTTP 代理（如 `http://127.0.0.1:7890` 或 `socks5://127.0.0.1:1080`）。**云服务器/海外主机建议配置国内代理**，可绕过网易云/QQ音乐对 IDC 出口 IP 的风控（症状：酷狗能用但网易云/QQ 无结果）
 - `voice_mode`：`url`（直发）/ `amr`（转码发送）/ `off`（仅卡片）
 - `quality`：默认音质 `standard` / `high` / `low`
 - `search_limit`：每页/每源结果条数
@@ -77,6 +78,15 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 
 - 需要 `ffmpeg`（AMR 转码用，自动探测系统 PATH 与常见路径）
 - 其余仅用 requests / asyncio / re / random，无第三方库
+
+## 专属日志
+
+插件运行日志写入独立文件（不混入 AstrBot 主日志），同时转发一份到 AstrBot 主日志/WebUI：
+
+- 位置：`plugin_data/astrbot_plugin_music_custom/logs/music.log`
+- 大小：单文件 2MB 自动滚动，保留最近 3 份备份
+- 内容：点歌/搜索/播放/发送等关键流程，以及每个源（网易云/QQ/酷狗/酷我/B站）的搜索返回、风控记录、播放地址获取结果
+- 排查技巧：看到 `源 xxx 搜索「...」无结果` 或 `HTTP 4xx/code=-460`，即为该源出口被风控；可在配置 `proxy` 走代理解决
 
 ## 数据
 
