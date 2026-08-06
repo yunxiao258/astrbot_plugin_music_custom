@@ -23,6 +23,8 @@ SHARE_RE = re.compile(r"music\.163\.com/(?:#/)?song(?:\?.*?&?id=(\d+)|/media/out
 
 def _parse_song(s: dict) -> MusicItem:
     """从网易云歌曲 JSON 构造 MusicItem"""
+    if not isinstance(s, dict):
+        return MusicItem(source="netease", id="", title="", artist="")
     artists = ", ".join(a.get("name", "") for a in s.get("artists") or [])
     return MusicItem(
         source="netease",
@@ -61,7 +63,12 @@ class NeteaseSource(MusicSource):
             logger.warning(f"[netease] 搜索 HTTP {r.status_code}: {url}")
             return {}
         try:
-            return r.json()
+            data = r.json()
+            # 网易云风控时可能返回 JSON 字符串（如 "请求过于频繁"），需防御
+            if not isinstance(data, dict):
+                logger.warning(f"[netease] 搜索响应非 JSON 对象: {type(data).__name__}, {str(data)[:80]}")
+                return {}
+            return data
         except Exception as e:
             logger.warning(f"[netease] 搜索响应解析失败: {e}\n{r.text[:200]}")
             return {}
@@ -74,6 +81,8 @@ class NeteaseSource(MusicSource):
             )
 
         j = await asyncio.to_thread(_do)
+        if not isinstance(j, dict):
+            return []
         songs = (j.get("result") or {}).get("songs") or []
         if not songs:
             # 记录 code / 空结果原因，方便排查（-460 表示被风控 / 需要验证）
@@ -91,6 +100,8 @@ class NeteaseSource(MusicSource):
             )
 
         j = await asyncio.to_thread(_do)
+        if not isinstance(j, dict):
+            return []
         songs = (j.get("result") or {}).get("songs") or []
         if not songs:
             logger.warning(
@@ -152,16 +163,17 @@ class NeteaseSource(MusicSource):
         except Exception as e:
             logger.warning(f"[netease] 获取播放地址异常 {item.id}: {e}")
             return ""
-        d = (j.get("data") or [])
-        if not d:
-            logger.warning(f"[netease] 播放地址接口无数据: {item.id}, code={j.get('code')}")
+        d = j.get("data") if isinstance(j, dict) else None
+        if not isinstance(d, list) or not d:
+            logger.warning(f"[netease] 播放地址接口无数据: {item.id}, code={j.get('code') if isinstance(j, dict) else '?'}")
             return ""
-        url = d[0].get("url") or ""
+        first = d[0] if isinstance(d[0], dict) else {}
+        url = first.get("url") or ""
         if url.startswith("http"):
             return url
         # 无版权/未登录拿不到直链，返回空由调用方回退卡片/换源
         logger.warning(
-            f"[netease] 无可用播放地址: {item.title} - {item.artist}, code={d[0].get('code')}"
+            f"[netease] 无可用播放地址: {item.title} - {item.artist}, code={first.get('code')}"
             f"{'' if self.config.get('netease_cookie') else '（未配置登录 Cookie，VIP 歌曲可能无法获取）'}"
         )
         return ""

@@ -1065,10 +1065,10 @@ class MusicPlugin(Star):
             )
             cfg_path = os.path.normpath(cfg_path)
             if os.path.isfile(cfg_path):
-                with open(cfg_path, "r", encoding="utf-8") as f:
+                with open(cfg_path, "r", encoding="utf-8-sig") as f:
                     data = _json.load(f)
                 data["netease_cookie"] = cookie_str
-                with open(cfg_path, "w", encoding="utf-8") as f:
+                with open(cfg_path, "w", encoding="utf-8-sig") as f:
                     _json.dump(data, f, ensure_ascii=False, indent=2)
                 logger.info("[netease-login] Cookie 已持久化到配置文件")
         except Exception as e:
