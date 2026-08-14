@@ -7,6 +7,7 @@ import random
 import re
 import time
 import unicodedata
+from datetime import datetime
 
 from astrbot.api import AstrBotConfig
 from astrbot.api.all import MessageChain, MessageEventResult
