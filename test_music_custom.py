@@ -44,6 +44,11 @@ class FakeSources:
     def __init__(self, by_kw, lyric="第一行歌词\n第二行歌词\n第三行歌词"):
         self.by_kw = by_kw
         self.lyric = lyric
+        self.order = ["netease"]
+        self.display_name = "netease"
+
+    def get(self, name):
+        return self
 
     async def search_all(self, kw, limit=5):
         items = list(self.by_kw.get(kw, []))[:limit]
@@ -190,7 +195,8 @@ class TestCleanupCache(unittest.TestCase):
         small = os.path.join(self.cache_dir, "small.mp3")
         with open(big, "wb") as f:
             f.write(b"x" * 2048)
-            os.utime(big, (time.time() - 100, time.time() - 100))  # 最旧
+        # 注意：utime 须在文件句柄关闭后调用（Windows 上对打开文件设置 mtime 会静默失效）
+        os.utime(big, (time.time() - 100, time.time() - 100))  # 最旧
         with open(small, "wb") as f:
             f.write(b"y" * 1024)
         p._cleanup_cache()
@@ -205,7 +211,8 @@ class TestCleanupCache(unittest.TestCase):
         old_in_sub = os.path.join(sub, "old.bin")
         with open(old_in_sub, "wb") as f:
             f.write(b"z" * 2048)
-            os.utime(old_in_sub, (time.time() - 100, time.time() - 100))
+        # utime 须在句柄关闭后调用，否则 Windows 上静默失效导致 mtime 未真正回拨
+        os.utime(old_in_sub, (time.time() - 100, time.time() - 100))
         fresh = os.path.join(self.cache_dir, "fresh.bin")
         with open(fresh, "wb") as f:
             f.write(b"f" * 1024)
@@ -343,6 +350,62 @@ class TestNewFeatures(unittest.TestCase):
             self.assertIn("u1", text)
             result2 = asyncio.run(p._do_stats(FakeEvent("u1"), "歌 不存在"))
             self.assertIn("没有", self._text(result2))
+
+    # ---------- 修复回归测试 ----------
+
+    def test_safe_int_falls_back_on_dirty_config(self):
+        p = make_plugin(frequency_seconds="abc", daily_limit=None, search_limit="")
+        # WebUI 脏值不会崩溃，回退默认
+        self.assertEqual(p._safe_int("frequency_seconds", 30, ""), 30)
+        self.assertEqual(p._safe_int("daily_limit", 0, ""), 0)
+        self.assertEqual(p._safe_int("search_limit", 5, "g1"), 5)
+        # 正常值仍然生效
+        self.assertTrue(p._check_frequency("u1"))
+
+    def test_hot_push_task_started_on_init(self):
+        async def scenario():
+            p = make_plugin(hot_push_enable=True)
+            started = p._push_task is not None
+            if p._push_task:
+                p._push_task.cancel()
+            return started
+        self.assertTrue(asyncio.run(scenario()))
+
+    def test_hot_push_task_not_started_when_disabled(self):
+        p = make_plugin(hot_push_enable=False)
+        self.assertIsNone(p._push_task)
+
+    def test_hot_respects_quota(self):
+        p = self._plugin()
+        p.config["daily_limit"] = 0
+        state = {"used": 0}
+        p.quota = SimpleNamespace(
+            used_today=lambda uid, day: state["used"],
+            consume=lambda uid, day: (state.__setitem__("used", state["used"] + 1) or state["used"]),
+        )
+        # daily_limit=1 时超限拦截
+        p.config["daily_limit"] = 1
+        p.quota = SimpleNamespace(
+            used_today=lambda uid, day: 1,
+            consume=lambda uid, day: 2,
+        )
+        result = asyncio.run(p._do_hot(FakeEvent("u1")))
+        self.assertIn("已达上限", self._text(result))
+
+    def test_hot_allowed_with_quota(self):
+        p = self._plugin()
+        p.config["daily_limit"] = 5
+        state = {"used": 0}
+        p.quota = SimpleNamespace(
+            used_today=lambda uid, day: state["used"],
+            consume=lambda uid, day: (state.__setitem__("used", state["used"] + 1) or state["used"]),
+        )
+        async def fake_hot(limit=5):
+            return [mk_item(title="热歌", mid="1")]
+        p.sources.get_hot = fake_hot
+        result = asyncio.run(p._do_hot(FakeEvent("u1")))
+        self.assertIn("热歌", self._text(result))
+        self.assertEqual(state["used"], 1)
 
 
 if __name__ == "__main__":

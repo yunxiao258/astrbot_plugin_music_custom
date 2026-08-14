@@ -89,7 +89,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.6.0")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.6.1")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -133,6 +133,9 @@ class MusicPlugin(Star):
             logger.warning(f"恢复网易云 Cookie 失败: {e}")
         # 定期清理缓存目录
         self._cleanup_cache()
+        # WebUI 直接配置 hot_push_enable 时也要启动热推任务
+        if self.config.get("hot_push_enable", False):
+            self._ensure_push_task()
         logger.info("【CUSTOM-MUSIC】插件初始化完成")
 
     # ---------- 工具 ----------
@@ -140,7 +143,7 @@ class MusicPlugin(Star):
     def _purge_stale_pending(self, group_id: str = "") -> None:
         """清理过期选歌会话（超时后长时间无人交互的堆积项）"""
         try:
-            timeout = max(1, int(self._cfg("select_timeout", 30, group_id)))
+            timeout = max(1, self._safe_int("select_timeout", 30, group_id))
             now = time.time()
             groups = [group_id] if group_id else list(self._pending.keys())
             for gid in groups:
@@ -162,6 +165,13 @@ class MusicPlugin(Star):
             if v is not None:
                 return v
         return self.config.get(key, default)
+
+    def _safe_int(self, key: str, default: int, group_id: str = "") -> int:
+        """安全整数配置：非法/缺失值回退默认，避免 WebUI 脏值导致崩溃"""
+        try:
+            return int(self._cfg(key, default, group_id))
+        except (TypeError, ValueError):
+            return int(default)
 
     def _sync_order_aliases(self) -> None:
         """将 aliases 配置合并进标准指令的别名集合（装饰器静态注册的 CommandFilter）"""
@@ -203,7 +213,7 @@ class MusicPlugin(Star):
 
     def _check_frequency(self, user_id: str, group_id: str = "") -> bool:
         """频率限制：返回 True 表示允许"""
-        sec = int(self._cfg("frequency_seconds", 30, group_id))
+        sec = self._safe_int("frequency_seconds", 30, group_id)
         if sec <= 0:
             return True
         now = time.time()
@@ -215,7 +225,7 @@ class MusicPlugin(Star):
 
     def _check_quota(self, event, group_id: str) -> tuple[bool, str]:
         """每日配额检查：返回 (允许, 提示消息)。允许时扣除一次"""
-        limit = int(self._cfg("daily_limit", 0, group_id))
+        limit = self._safe_int("daily_limit", 0, group_id)
         if limit <= 0:
             return True, ""
         user_id = str(event.get_sender_id())
@@ -271,7 +281,7 @@ class MusicPlugin(Star):
         return items[(page - 1) * per: page * per], page, total
 
     def _fmt_list(self, items, page: int = 1, total_pages: int = 1, head: str = "") -> str:
-        lines = [head or "为你找到这些歌曲，回复序号选择（{} 秒内）:".format(int(self._cfg("select_timeout", 30)))]
+        lines = [head or "为你找到这些歌曲，回复序号选择（{} 秒内）:".format(self._safe_int("select_timeout", 30))]
         for i, it in enumerate(items, 1):
             src = self.sources.get(it.source)
             tag = src.display_name if src else it.source
@@ -379,8 +389,8 @@ class MusicPlugin(Star):
                 card = qqsrc.get_card(item)
                 if card is not None:
                     segs.append(Music(**card))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"QQ 音乐卡片构建失败，回退封面/链接: {e}")
         if not segs and self._cfg("enable_artwork", True) and item.artwork and item.artwork.startswith("http"):
             try:
                 segs.append(Image.fromURL(item.artwork))
@@ -497,7 +507,7 @@ class MusicPlugin(Star):
         ok, hint = self._check_quota(event, group_id)
         if not ok:
             return self._send_text(event, hint)
-        limit = int(self._cfg("search_limit", 5, group_id))
+        limit = self._safe_int("search_limit", 5, group_id)
         kw = keyword
         results = await self.sources.search_all(kw, limit=limit)
         logger.info(
@@ -513,7 +523,7 @@ class MusicPlugin(Star):
             items = [it for it in lyric_items if not self.blocked.is_blocked(it)][:limit]
             if not items:
                 return self._send_text(event, "😢 没找到包含这段歌词的歌，换个词试试？")
-            head = f"🎶 按歌词找到这些歌{(f"（{hint}）") if hint else ""}，回复序号播放："
+            head = f"🎶 按歌词找到这些歌{(f'（{hint}）') if hint else ''}，回复序号播放："
             self._pending.setdefault(group_id, {})[user_id] = {
                 "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality, "group_id": group_id,
             }
@@ -533,7 +543,7 @@ class MusicPlugin(Star):
             logger.warning(f"[music] 「{kw}」搜索无任何可播放结果")
             return self._send_text(event, f"😢 没有找到相关歌曲{tip}，换个关键词试试？")
         heads = {
-            "search": f"找到这些歌曲，回复序号播放{(f"（{hint}）") if hint else ""}：",
+            "search": f"找到这些歌曲，回复序号播放{(f'（{hint}）') if hint else ''}：",
             "fav": "搜索到这些歌曲，回复序号即可收藏：",
             "queue": "搜索到这些歌曲，回复序号加入播放队列：",
         }
@@ -572,13 +582,16 @@ class MusicPlugin(Star):
         """热门/榜单：取第一个启用源的热门列表，进入选歌状态"""
         user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id() or "private")
+        ok, hint = self._check_quota(event, group_id)
+        if not ok:
+            return self._send_text(event, hint)
         items = []
         for name in self.sources.order:
             src = self.sources.get(name)
             if not src:
                 continue
             try:
-                items = await src.get_hot(limit=int(self._cfg("search_limit", 5, group_id)))
+                items = await src.get_hot(limit=self._safe_int("search_limit", 5, group_id))
                 if items:
                     break
             except Exception:
@@ -678,7 +691,7 @@ class MusicPlugin(Star):
                 q = self._queues.get(gid)
                 if not q:
                     continue
-                interval = int(self._cfg("queue_interval", 5, gid))
+                interval = self._safe_int("queue_interval", 5, gid)
                 now = time.time()
                 if now - self._queue_last.get(gid, 0) < interval:
                     continue
@@ -724,7 +737,7 @@ class MusicPlugin(Star):
 
     def _enqueue(self, group_id: str, item, event, user_id: str, user_name: str) -> str:
         q = self._queues.setdefault(group_id, [])
-        limit = int(self._cfg("queue_limit", 10, group_id))
+        limit = self._safe_int("queue_limit", 10, group_id)
         if len(q) >= limit:
             return f"队列已满（上限 {limit} 首），请稍后再试～"
         q.append({"item": item, "event": event, "user_id": user_id, "user_name": user_name})
@@ -865,7 +878,7 @@ class MusicPlugin(Star):
         parts = parts[:5]
         user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id() or "private")
-        limit = int(self._cfg("search_limit", 5, group_id))
+        limit = self._safe_int("search_limit", 5, group_id)
         played = []
         failed = []
         for kw in parts:
@@ -933,7 +946,7 @@ class MusicPlugin(Star):
         if not sess:
             return self._send_text(event, "你当前没有选歌列表，发「/点歌 歌名」开始吧～")
         try:
-            if time.time() - sess["ts"] > int(self._cfg("select_timeout", 30, group_id)):
+            if time.time() - sess["ts"] > self._safe_int("select_timeout", 30, group_id):
                 pending.pop(user_id, None)
                 if not pending:
                     self._pending.pop(group_id, None)
@@ -978,7 +991,7 @@ class MusicPlugin(Star):
         if not m:
             return None
         try:
-            if time.time() - sess["ts"] > int(self._cfg("select_timeout", 30, group_id)):
+            if time.time() - sess["ts"] > self._safe_int("select_timeout", 30, group_id):
                 pending.pop(user_id, None)
                 if not pending:
                     self._pending.pop(group_id, None)
@@ -991,7 +1004,7 @@ class MusicPlugin(Star):
             if not pending:
                 self._pending.pop(group_id, None)
             # 翻页后的全局序号
-            per = max(1, int(self._cfg("search_limit", 5, group_id)))
+            per = max(1, self._safe_int("search_limit", 5, group_id))
             global_idx = (int(sess.get("page", 1)) - 1) * per + idx
             if not 1 <= global_idx <= len(items):
                 return self._send_text(event, "序号超出范围，请重新翻页查看～")
