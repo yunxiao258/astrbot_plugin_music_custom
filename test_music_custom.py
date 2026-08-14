@@ -18,9 +18,11 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class FakeEvent:
-    def __init__(self, sender_id="", is_admin=False):
+    def __init__(self, sender_id="", is_admin=False, message_str="", group_id=""):
         self._sender_id = sender_id
         self._is_admin = is_admin
+        self.message_str = message_str
+        self._group_id = group_id
 
     def get_sender_id(self):
         return self._sender_id
@@ -29,10 +31,13 @@ class FakeEvent:
         return "测试用户"
 
     def get_group_id(self):
-        return ""
+        return self._group_id
 
     def is_admin(self):
         return self._is_admin
+
+    def stop_event(self):
+        pass
 
     def chain_result(self, chain):
         return chain
@@ -90,7 +95,35 @@ def make_plugin(**overrides):
         data={},
         get_key=lambda g, k: p.groups.data.get(g, {}).get(k),
         set_key=lambda g, k, v: p.groups.data.setdefault(g, {}).__setitem__(k, v),
+        reset_key=lambda g, k=None: (
+            p.groups.data.get(g, {}).pop(k, None) is not None
+            if k
+            else (p.groups.data.pop(g, None) is not None)
+        ),
     )
+    # 屏蔽词/收藏内存替身
+    terms = []
+
+    def _block(t):
+        if t in terms:
+            return False
+        terms.append(t)
+        return True
+
+    def _unblock(t):
+        if t in terms:
+            terms.remove(t)
+            return True
+        return False
+
+    p.blocked = SimpleNamespace(
+        _terms=terms,
+        block=_block,
+        unblock=_unblock,
+        list=lambda: list(terms),
+        is_blocked=lambda t: t in terms,
+    )
+    p.favs = SimpleNamespace(remove=lambda uid, idx: True)
     return p
 
 
@@ -406,6 +439,79 @@ class TestNewFeatures(unittest.TestCase):
         result = asyncio.run(p._do_hot(FakeEvent("u1")))
         self.assertIn("热歌", self._text(result))
         self.assertEqual(state["used"], 1)
+
+
+class TestAdminCommands(unittest.TestCase):
+    """/song 管理命令：set / gset / greset 的权限与行为"""
+
+    def _text(self, result):
+        if not result:
+            return ""
+        chain = result if isinstance(result, list) else getattr(result, "chain", [])
+        return "".join(c.text for c in chain if hasattr(c, "text"))
+
+    def test_song_admin_denied_for_non_admin(self):
+        p = make_plugin()
+        ev = FakeEvent(sender_id="u1", is_admin=False, message_str="song set search_limit 3")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("只有管理员", self._text(result))
+
+    def test_set_global_updates_config(self):
+        p = make_plugin()
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song set search_limit 3")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("已更新全局 search_limit = 3", self._text(result))
+        self.assertEqual(p.config["search_limit"], 3)
+
+    def test_set_unknown_key_rejected(self):
+        p = make_plugin()
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song set not_a_key 1")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("未知配置项", self._text(result))
+
+    def test_set_numeric_key_non_number_rejected(self):
+        p = make_plugin()
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song set search_limit abc")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("需要数字", self._text(result))
+
+    def test_gset_per_group(self):
+        p = make_plugin(search_limit=5)
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song gset search_limit 2", group_id="g1")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("已设置本群 search_limit = 2", self._text(result))
+        self.assertEqual(p.groups.get_key("g1", "search_limit"), 2)
+        # 全局不受影响
+        self.assertEqual(p.config["search_limit"], 5)
+
+    def test_greset_single_key(self):
+        p = make_plugin(search_limit=5)
+        p.groups.set_key("g1", "search_limit", 2)
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song greset search_limit", group_id="g1")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("已清除", self._text(result))
+        self.assertIsNone(p.groups.get_key("g1", "search_limit"))
+
+    def test_greset_all(self):
+        p = make_plugin()
+        p.groups.set_key("g1", "search_limit", 2)
+        p.groups.set_key("g1", "daily_limit", 9)
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song greset", group_id="g1")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("已清除", self._text(result))
+        self.assertEqual(p.groups.data.get("g1"), None)
+
+    def test_block_unblock_flow(self):
+        p = make_plugin()
+        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song block 违禁词")
+        result = asyncio.run(p.song_admin(ev))
+        self.assertIn("已屏蔽词", self._text(result))
+        # 重复屏蔽返回已在列表
+        result2 = asyncio.run(p.song_admin(ev))
+        self.assertIn("已在屏蔽列表", self._text(result2))
+        ev3 = FakeEvent(sender_id="u1", is_admin=True, message_str="song unblock 违禁词")
+        result3 = asyncio.run(p.song_admin(ev3))
+        self.assertIn("已解除屏蔽", self._text(result3))
 
 
 if __name__ == "__main__":
