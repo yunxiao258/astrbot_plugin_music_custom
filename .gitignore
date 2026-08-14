@@ -5,6 +5,7 @@ __pycache__/
 
 # 本地数据与配置（敏感，不上传）
 data/
+cache/
 *.log
 .env
 

@@ -88,7 +88,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.1")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.2")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -116,11 +116,43 @@ class MusicPlugin(Star):
         self._login_tasks: dict[str, asyncio.Task] = {}
         self._sms_sessions: dict[str, dict] = {}
         self._sync_order_aliases()
+        # 恢复上次登录的网易云 Cookie（数据目录持久化，避免 WebUI 配置覆盖丢失）
+        try:
+            from .store import JsonStore
+
+            cookie_store = JsonStore(
+                os.path.join(self.data_dir, "netease_cookie.json"), {}
+            )
+            saved = cookie_store.data.get("netease_cookie") or ""
+            if saved and not (self.config.get("netease_cookie") or "").strip():
+                self.config["netease_cookie"] = saved
+                self.sources.reload()
+                logger.info("已恢复上次登录的网易云 Cookie")
+        except Exception as e:
+            logger.warning(f"恢复网易云 Cookie 失败: {e}")
         # 定期清理缓存目录
         self._cleanup_cache()
         logger.info("【CUSTOM-MUSIC】插件初始化完成")
 
     # ---------- 工具 ----------
+
+    def _purge_stale_pending(self, group_id: str = "") -> None:
+        """清理过期选歌会话（超时后长时间无人交互的堆积项）"""
+        try:
+            timeout = max(1, int(self._cfg("select_timeout", 30, group_id)))
+            now = time.time()
+            groups = [group_id] if group_id else list(self._pending.keys())
+            for gid in groups:
+                pend = self._pending.get(gid)
+                if not pend:
+                    continue
+                expired = [uid for uid, s in pend.items() if now - s.get("ts", 0) > timeout]
+                for uid in expired:
+                    pend.pop(uid, None)
+                if not pend:
+                    self._pending.pop(gid, None)
+        except Exception:
+            pass
 
     def _cfg(self, key, default, group_id: str = ""):
         """配置读取：群独立配置优先，其次全局"""
@@ -452,6 +484,7 @@ class MusicPlugin(Star):
         """搜索并进入选歌状态；mode: search/fav/queue/lyric；含去重排序、屏蔽过滤、宽松重搜、翻页"""
         user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id() or "private")
+        self._purge_stale_pending()
         ok, hint = self._check_quota(event, group_id)
         if not ok:
             return self._send_text(event, hint)
@@ -981,7 +1014,7 @@ class MusicPlugin(Star):
             return self._send_text(event, "⚠️ 登录成功但未获取到 Cookie，请重试或改用扫码登录")
         self._save_netease_cookie(cookie)
         self._sms_sessions.pop(user_id, None)
-        logger.info(f"[netease-login] 手机号验证码登录成功: {phone}")
+        logger.info(f"[netease-login] 手机号验证码登录成功: {phone[:3]}****{phone[-4:]}")
         return self._send_text(event, f"✅ 网易云登录成功（{phone}）！VIP 歌曲直链已解锁～")
 
     async def _start_qrcode_login(self, event, group_id: str) -> MessageEventResult:
@@ -1046,7 +1079,7 @@ class MusicPlugin(Star):
         return event.chain_result(chain)
 
     def _save_netease_cookie(self, cookie: str) -> None:
-        """保存登录 Cookie 到配置并重建源"""
+        """保存登录 Cookie：内存 + 插件数据目录原子持久化（不触碰 AstrBot 全局配置）"""
         # 仅保留关键字段，避免冗余
         keep = {"MUSIC_U", "__csrf", "NMTID", "MUSIC_A"}
         parts = [c.strip() for c in cookie.split(";") if "=" in c]
@@ -1063,21 +1096,19 @@ class MusicPlugin(Star):
             self.sources.reload()
         except Exception as e:
             logger.warning(f"[netease-login] reload 源失败: {e}")
-        # 尝试持久化到插件配置文件（WebUI 也能看到）
+        # 持久化到插件自身数据目录（原子写，WebUI 保存配置不会覆盖）
         try:
-            import json as _json
+            from .store import JsonStore
 
-            cfg_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "astrbot_plugin_music_custom_config.json"
+            store = JsonStore(
+                os.path.join(self.data_dir, "netease_cookie.json"), {}
             )
-            cfg_path = os.path.normpath(cfg_path)
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, "r", encoding="utf-8-sig") as f:
-                    data = _json.load(f)
-                data["netease_cookie"] = cookie_str
-                with open(cfg_path, "w", encoding="utf-8-sig") as f:
-                    _json.dump(data, f, ensure_ascii=False, indent=2)
-                logger.info("[netease-login] Cookie 已持久化到配置文件")
+            store.data["netease_cookie"] = cookie_str
+            store.data["updated_at"] = (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+            store.save()
+            logger.info("[netease-login] Cookie 已持久化到插件数据目录")
         except Exception as e:
             logger.warning(f"[netease-login] Cookie 持久化失败（重启后可能丢失）: {e}")
 

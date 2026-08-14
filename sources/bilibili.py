@@ -21,13 +21,32 @@ class BilibiliSource(MusicSource):
     name = "bilibili"
     display_name = "哔哩哔哩"
 
+    # buvid cookie 缓存（SPI 单次请求即可，短时复用避免每次搜索多一次 HTTP 往返）
+    _cookie_cache: str = ""
+    _cookie_ts: float = 0.0
+    _COOKIE_TTL = 600.0  # 10 分钟
+
     async def _get_cookie(self) -> str:
+        import time as _time
+
+        if (
+            self._cookie_cache
+            and _time.monotonic() - self._cookie_ts < self._COOKIE_TTL
+        ):
+            return self._cookie_cache
+
         def _do():
             r = self.session.get(SPI_URL, timeout=10)
             d = r.json()["data"]
             return f"buvid3={d['b_3']};buvid4={d['b_4']}"
 
-        return await asyncio.to_thread(_do)
+        try:
+            cookie = await asyncio.to_thread(_do)
+        except Exception:
+            return self._cookie_cache or ""
+        self._cookie_cache = cookie
+        self._cookie_ts = _time.monotonic()
+        return cookie
 
     @staticmethod
     def _clean_title(title: str) -> str:

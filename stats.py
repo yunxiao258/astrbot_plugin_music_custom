@@ -144,8 +144,6 @@ class MusicStats:
             for uid, e in self.data["users"].items():
                 daily = e.get("daily")
                 score = sum(n for d, n in daily.items() if d >= since) if (since and daily) else int(e.get("count", 0))
-                if since and not daily and int(e.get("count", 0)) and int(e.get("count", 0)):
-                    pass
                 if score <= 0:
                     continue
                 ranked.append({"user_id": uid, "name": e.get("name", ""), "score": score})

@@ -2,22 +2,33 @@
 
 import asyncio
 import os
+import shutil
 import subprocess
 import tempfile
+import time
 
 FFMPEG = None
+# 探测失败冷却：避免高频转换时反复等待超时子进程
+_LAST_FAIL_TS = 0.0
+_RETRY_INTERVAL = 600.0
 
 
 def _find_ffmpeg() -> str | None:
-    """查找 ffmpeg：优先环境变量，其次常见路径"""
-    global FFMPEG
+    """查找 ffmpeg：优先环境变量，其次 PATH/常见安装路径；失败后冷却 10 分钟再试"""
+    global FFMPEG, _LAST_FAIL_TS
     if FFMPEG is not None:
         return FFMPEG
+    if time.monotonic() - _LAST_FAIL_TS < _RETRY_INTERVAL:
+        return None
     candidates = [
         os.environ.get("FFMPEG_PATH", ""),
+        shutil.which("ffmpeg") or "",
         "ffmpeg",
-        r"C:\Users\Administrator\ffmpeg\ffmpeg.exe",
     ]
+    # 常见安装路径（不再写死用户目录）
+    for base in (os.environ.get("ProgramFiles", r"C:\Program Files"), r"C:\ffmpeg"):
+        for sub in (r"ffmpeg\bin\ffmpeg.exe", r"bin\ffmpeg.exe"):
+            candidates.append(os.path.join(base, sub))
     for c in candidates:
         if not c:
             continue
@@ -29,6 +40,7 @@ def _find_ffmpeg() -> str | None:
         except Exception:
             continue
     FFMPEG = ""
+    _LAST_FAIL_TS = time.monotonic()
     return None
 
 

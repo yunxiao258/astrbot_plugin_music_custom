@@ -1,8 +1,8 @@
-name: astrbot_plugin_music_custom
+﻿name: astrbot_plugin_music_custom
 display_name: 自研点歌插件
 desc: 群聊点歌：多源聚合搜索（网易云/酷我/酷狗/QQ音乐/bilibili），语音/卡片发送，选歌交互，随机/热门/统计
 help: 发送「/点歌 歌名」搜索歌曲并回复序号选择；「/点歌 随机」随机点歌；「/点歌 热门」查看榜单；「/点歌 统计」查看热门点歌榜
-version: 1.5.1
+version: 1.5.2
 author: Administrator
 repo: https://github.com/yunxiao258/astrbot_plugin_music_custom
 
