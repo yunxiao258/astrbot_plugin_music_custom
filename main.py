@@ -89,7 +89,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.3")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.6.0")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -643,6 +643,21 @@ class MusicPlugin(Star):
             for i, s in enumerate(top, 1):
                 lines.append(f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）")
             return self._send_text(event, "\n".join(lines))
+        elif extra.startswith(("歌 ", "歌曲 ")):
+            # 单曲详情：/点歌 统计 歌 <关键词>（谁点过、多少次、最近一次）
+            kw = re.sub(r"^(歌|歌曲)\s*", "", extra).strip()
+            hits = self.stats.find_songs(kw, 5)
+            if not hits:
+                return self._send_text(event, f"没有「{kw}」的点歌记录～")
+            lines = [f"🎶 「{kw}」相关点歌记录:"]
+            for s in hits:
+                lines.append(f"📍 {s['title']} - {s['artist']}")
+                lines.append(f"   共点 {s['count']} 次，最近 {time.strftime('%m-%d %H:%M', time.localtime(s.get('last_at', 0)))}")
+                users = s.get("users", {})
+                if users:
+                    who = "、".join(list(users)[:5])
+                    lines.append(f"   点过的人: {who}" + (" 等" if len(users) > 5 else ""))
+            return self._send_text(event, "\n".join(lines))
         else:
             top = self.stats.top_songs(10)
             label = "总榜"
@@ -792,6 +807,22 @@ class MusicPlugin(Star):
             if kw == "统计" or kw.startswith("统计 "):
                 extra = kw[2:].strip() if kw.startswith("统计") else ""
                 return await self._do_stats(event, extra)
+            # 批量点歌：/点歌 批量 歌1，歌2，歌3
+            if kw in ("批量", "连播", "多首") or kw.startswith(("批量 ", "连播 ", "多首 ")):
+                names = kw.split(maxsplit=1)[1].strip() if " " in kw else ""
+                if not names:
+                    return self._send_text(event, "批量点歌用法: /点歌 批量 歌1，歌2，歌3（最多 5 首，用逗号/顿号分隔）")
+                if not self._check_frequency(str(event.get_sender_id()), group_id):
+                    return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
+                return await self._do_batch(event, names)
+            # 完整歌词：/点歌 歌词本 <歌名>（区别于「歌词 xxx」的按歌词搜歌）
+            if kw.startswith(("歌词本", "看歌词", "完整歌词")):
+                sub = re.sub(r"^(歌词本|看歌词|完整歌词)[\s:：]*", "", kw).strip()
+                if not sub:
+                    return self._send_text(event, "歌词本用法: /点歌 歌词本 <歌名>（仅网易云歌曲有歌词）")
+                if not self._check_frequency(str(event.get_sender_id()), group_id):
+                    return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
+                return await self._do_lyric_full(event, sub)
             pm = PAGE_PATTERN.search(kw)
             if pm:
                 return await self._do_page(event, pm.group(1))
@@ -823,6 +854,73 @@ class MusicPlugin(Star):
             return await self._do_search(event, kw)
         finally:
             event.stop_event()
+
+    # ---------- 批量点歌 / 完整歌词 ----------
+
+    async def _do_batch(self, event, names: str) -> MessageEventResult | None:
+        """批量点歌：/点歌 批量 歌1，歌2，歌3（最多 5 首，逐首搜索取最佳结果直接播放）"""
+        parts = [p.strip() for p in re.split(r"[,，、;；|｜]+", names) if p.strip()]
+        if not parts:
+            return self._send_text(event, "批量点歌用法: /点歌 批量 歌1，歌2，歌3")
+        parts = parts[:5]
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or "private")
+        limit = int(self._cfg("search_limit", 5, group_id))
+        played = []
+        failed = []
+        for kw in parts:
+            ok, hint = self._check_quota(event, group_id)
+            if not ok:
+                failed.append(f"「{kw}」{hint}")
+                continue
+            try:
+                results = await self.sources.search_all(kw, limit=limit)
+                items = [it for _, its in results for it in its]
+                items = [it for it in items if not self.blocked.is_blocked(it)]
+                if not items:
+                    failed.append(f"「{kw}」未找到")
+                    continue
+                item = items[0]
+                await self._play_item(event, item, kw)
+                played.append(f"「{item.title} - {item.artist}」")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"[music] 批量点歌「{kw}」失败: {e}")
+                failed.append(f"「{kw}」播放失败")
+        lines = []
+        if played:
+            lines.append(f"🎵 批量点歌完成（{len(played)} 首）:")
+            lines.extend(f"  ✅ {p}" for p in played)
+        if failed:
+            lines.append(f"⚠️ 未播放（{len(failed)} 首）:")
+            lines.extend(f"  ❌ {p}" for p in failed)
+        return self._send_text(event, "\n".join(lines) or "😢 批量点歌失败，稍后再试～")
+
+    async def _do_lyric_full(self, event, keyword: str) -> MessageEventResult | None:
+        """完整歌词：/点歌 歌词本 <歌名>（取最佳结果，仅网易云有歌词）"""
+        limit = int(self._cfg("search_limit", 5, str(event.get_group_id() or "private")))
+        results = await self.sources.search_all(keyword, limit=limit)
+        items = [it for _, its in results for it in its]
+        items = [it for it in items if not self.blocked.is_blocked(it)]
+        if not items:
+            return self._send_text(event, f"😢 没有找到「{keyword}」这首歌～")
+        item = items[0]
+        if item.source != "netease":
+            return self._send_text(event, f"「{item.title}」来自 {item.source}，暂不支持歌词显示（仅网易云）～")
+        try:
+            lyric = await self.sources.get_lyric(item, max_lines=60)
+        except Exception:
+            lyric = ""
+        if not lyric:
+            return self._send_text(event, f"「{item.title}」暂无歌词或获取失败～")
+        lines = [f"🎤 {item.title} - {item.artist}"]
+        lines.append("━━━━━━━━━━━━━━━━━")
+        body = lyric.splitlines()
+        # 超长保护：最多展示 40 行
+        if len(body) > 40:
+            body = body[:40]
+            body.append("…（歌词较长，已截断）")
+        lines.extend(body)
+        return self._send_text(event, "\n".join(lines))
 
     async def _do_page(self, event, cmd: str) -> MessageEventResult | None:
         """翻页：下一页 / 上一页"""

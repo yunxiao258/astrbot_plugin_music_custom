@@ -149,3 +149,17 @@ class MusicStats:
                 ranked.append({"user_id": uid, "name": e.get("name", ""), "score": score})
             ranked.sort(key=lambda x: x["score"], reverse=True)
             return ranked[:limit]
+
+    def find_songs(self, keyword: str, limit: int = 5) -> list[dict]:
+        """按标题/歌手模糊搜索点歌记录（用于「统计 歌 <关键词>」查询单曲详情）"""
+        kw = (keyword or "").strip().lower()
+        with self._lock:
+            if not kw:
+                return []
+            hits = []
+            for e in self.data["songs"].values():
+                if kw in str(e.get("title", "")).lower() or kw in str(e.get("artist", "")).lower():
+                    hits.append(e)
+                if len(hits) >= limit:
+                    break
+            return hits
