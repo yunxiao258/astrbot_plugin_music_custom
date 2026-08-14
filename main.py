@@ -89,7 +89,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.2")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.5.3")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -315,7 +315,7 @@ class MusicPlugin(Star):
                 logger.warning(f"点歌语音 URL 直发失败，转 amr 模式: {e}")
         # amr 兜底：下载 → 转码 → 本地文件发送（命中缓存则跳过）
         try:
-            tmp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+            tmp_dir = self._cache_dir()
             os.makedirs(tmp_dir, exist_ok=True)
             mp3_path = os.path.join(tmp_dir, f"{item.key.replace(':', '_')}.mp3")
             amr_path = os.path.join(tmp_dir, f"{item.key.replace(':', '_')}.amr")
@@ -333,19 +333,27 @@ class MusicPlugin(Star):
             logger.warning(f"点歌语音 amr 发送失败: {e}")
             return None
 
+    def _cache_dir(self) -> str:
+        """语音缓存目录：可用配置 cache_dir 覆盖，默认插件目录下 cache"""
+        cfg_dir = str(self.config.get("cache_dir", "") or "").strip()
+        if cfg_dir:
+            return os.path.abspath(cfg_dir)
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+
     def _cleanup_cache(self):
         """清理缓存目录，超过 cache_max_mb 时删除最旧文件"""
         try:
             max_mb = float(self._cfg("cache_max_mb", 200))
             if max_mb <= 0:
                 return
-            cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+            cache_dir = self._cache_dir()
             if not os.path.isdir(cache_dir):
                 return
+            # 递归扫描（含封面缩略图等子目录），避免子目录占用漏清理
             files = [
-                os.path.join(cache_dir, f)
-                for f in os.listdir(cache_dir)
-                if os.path.isfile(os.path.join(cache_dir, f))
+                os.path.join(root, f)
+                for root, _, names in os.walk(cache_dir)
+                for f in names
             ]
             total = sum(os.path.getsize(f) for f in files) / 1024 / 1024
             if total <= max_mb:
