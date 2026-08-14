@@ -125,17 +125,41 @@ class MusicStats:
         with self._lock:
             rows = []
             for e in self.data["songs"].values():
-                cnt = int(e.get("groups", {}).get(group_id, 0))
+                cnt = self._group_count(e, group_id, since)
                 if cnt <= 0:
                     continue
-                if days:
-                    # 群维度无天级明细，用该群占比近似窗口值
-                    total_daily = sum(e.get("daily", {}).get(d, 0) for d in e.get("daily", {}) if d >= since)
-                    if total_daily:
-                        cnt = max(1, round(cnt * total_daily / max(1, e.get("count", 1))))
                 rows.append({**e, "score": cnt, "count": cnt})
             rows.sort(key=lambda x: x["score"], reverse=True)
             return rows[:limit]
+
+    @staticmethod
+    def _group_count(entry: dict, group_id: str, since: str) -> int:
+        """群维度窗口内点播次数：优先 daily 精确统计 + 群占比近似"""
+        cnt = int(entry.get("groups", {}).get(group_id, 0))
+        if cnt <= 0:
+            return 0
+        if since:
+            total_daily = sum(
+                entry.get("daily", {}).get(d, 0) for d in entry.get("daily", {}) if d >= since
+            )
+            if not total_daily:
+                return 0
+            return max(1, round(cnt * total_daily / max(1, entry.get("count", 1))))
+        return cnt
+
+    def group_totals(self, group_id: str, days: int = 7) -> int:
+        """群维度窗口内点播总次数"""
+        since = "" if not days else self._since_date(days)
+        with self._lock:
+            return sum(self._group_count(e, group_id, since) for e in self.data["songs"].values())
+
+    def active_groups(self) -> list[str]:
+        """返回所有出现过点歌记录的群 id（用于周报自动选择目标群）"""
+        with self._lock:
+            gs = set()
+            for e in self.data["songs"].values():
+                gs.update(str(g) for g in e.get("groups", {}).keys())
+            return [g for g in gs if g.isdigit()]
 
     def top_users(self, limit: int = 10, days: int = 0) -> list[dict]:
         since = "" if not days else self._since_date(days)

@@ -84,6 +84,7 @@ def make_plugin(**overrides):
         "select_timeout": 30,
         "cache_max_mb": 200,
         "voice_mode": "off",
+        "weekly_report_enable": False,  # 测试环境无事件循环，避免 __init__ 创建后台任务
     }
     cfg.update(overrides)
     p = MusicPlugin(context=None, config=cfg)
@@ -383,6 +384,129 @@ class TestNewFeatures(unittest.TestCase):
             self.assertIn("u1", text)
             result2 = asyncio.run(p._do_stats(FakeEvent("u1"), "歌 不存在"))
             self.assertIn("没有", self._text(result2))
+
+    # ---------- 周报 ----------
+
+    def _seed_stats(self, p):
+        from datetime import date
+
+        today = date.today().isoformat()
+        p.stats.data["songs"] = {
+            "netease:1": {
+                "title": "晴天", "artist": "周杰伦", "source": "netease",
+                "count": 5, "last_at": int(time.time()),
+                "daily": {today: 5}, "groups": {"10001": 3, "20002": 2},
+                "users": {"u1": 5},
+            },
+            "netease:2": {
+                "title": "夜曲", "artist": "周杰伦", "source": "netease",
+                "count": 2, "last_at": int(time.time()),
+                "daily": {today: 2}, "groups": {"10001": 2},
+                "users": {"u2": 2},
+            },
+        }
+        p.stats.data["users"] = {
+            "u1": {"name": "小明", "count": 5, "daily": {today: 5}},
+            "u2": {"name": "小红", "count": 2, "daily": {today: 2}},
+        }
+
+    def test_weekly_report_group_text(self):
+        p = make_plugin()
+        self._seed_stats(p)
+        text = p._weekly_report_text("10001")
+        self.assertIn("点歌周报", text)
+        self.assertIn("本周共点歌 5 次", text)  # 3 + 2（群占比）
+        self.assertIn("晴天 - 周杰伦", text)
+        self.assertIn("点了 3 次", text)
+
+    def test_weekly_report_global_text(self):
+        p = make_plugin()
+        self._seed_stats(p)
+        text = p._weekly_report_text("")
+        self.assertIn("本周共点歌 7 次", text)
+        self.assertIn("1. 晴天 - 周杰伦（点了 5 次）", text)
+
+    def test_report_target_groups_from_config(self):
+        p = make_plugin(weekly_report_groups="111, 222，333")
+        self.assertEqual(p._report_target_groups(), ["111", "222", "333"])
+
+    def test_report_target_groups_auto(self):
+        p = make_plugin()
+        self._seed_stats(p)
+        groups = p._report_target_groups()
+        self.assertEqual(sorted(groups), ["10001", "20002"])
+
+    def test_report_push_sends_once_per_week(self):
+        from datetime import datetime
+
+        async def scenario():
+            p = make_plugin(weekly_report_enable=True, weekly_report_time="00:00")
+            p.config["weekly_report_weekday"] = datetime.now().weekday() + 1
+            self._seed_stats(p)
+            sent = []
+            pushed = []
+
+            async def fake_send(session, chain):
+                sent.append((session, "".join(c.text for c in chain.chain)))
+                return True
+
+            p.context = SimpleNamespace(send_message=fake_send)
+            p.push_state = SimpleNamespace(
+                already_pushed=lambda k: k in pushed,
+                mark_pushed=pushed.append,
+            )
+            await p._report_push_once()
+            await p._report_push_once()
+            return sent, pushed
+
+        sent, pushed = asyncio.run(scenario())
+        # 同周同群只推一次
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(len(pushed), 2)
+        self.assertTrue(sent[0][0].endswith(":10001"))
+        self.assertIn("晴天", sent[0][1])
+
+    def test_report_push_skipped_wrong_weekday(self):
+        from datetime import datetime
+
+        async def scenario():
+            p = make_plugin(weekly_report_enable=True, weekly_report_time="00:00")
+            p.config["weekly_report_weekday"] = (datetime.now().weekday() + 1) % 7 + 1
+            sent = []
+
+            async def fake_send(session, chain):
+                sent.append(session)
+                return True
+
+            p.context = SimpleNamespace(send_message=fake_send)
+            p.push_state = SimpleNamespace(
+                already_pushed=lambda k: False, mark_pushed=lambda k: None
+            )
+            await p._report_push_once()
+            return sent
+
+        self.assertEqual(asyncio.run(scenario()), [])
+
+    def test_report_push_skipped_before_time(self):
+        from datetime import datetime
+
+        async def scenario():
+            p = make_plugin(weekly_report_enable=True, weekly_report_time="99:99")
+            p.config["weekly_report_weekday"] = datetime.now().weekday() + 1
+            sent = []
+
+            async def fake_send(session, chain):
+                sent.append(session)
+                return True
+
+            p.context = SimpleNamespace(send_message=fake_send)
+            p.push_state = SimpleNamespace(
+                already_pushed=lambda k: False, mark_pushed=lambda k: None
+            )
+            await p._report_push_once()
+            return sent
+
+        self.assertEqual(asyncio.run(scenario()), [])
 
     # ---------- 修复回归测试 ----------
 

@@ -101,6 +101,26 @@
     "type": "string",
     "default": "onebot"
   },
+  "weekly_report_enable": {
+    "description": "是否开启每周点歌排行榜推送",
+    "type": "bool",
+    "default": true
+  },
+  "weekly_report_weekday": {
+    "description": "周报推送星期（1=周一 … 7=周日）",
+    "type": "int",
+    "default": 7
+  },
+  "weekly_report_time": {
+    "description": "周报推送时间（HH:MM，24 小时制）",
+    "type": "string",
+    "default": "20:00"
+  },
+  "weekly_report_groups": {
+    "description": "周报目标群号（逗号分隔；留空自动推送到所有有点歌记录的群）",
+    "type": "string",
+    "default": ""
+  },
   "cache_max_mb": {
     "description": "语音转码缓存目录大小上限（MB，超出自动清理最旧文件）",
     "type": "int",

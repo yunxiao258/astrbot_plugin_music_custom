@@ -71,6 +71,10 @@ ADMIN_KEYS = {
     "hot_push_time": "定时推送时间 HH:MM",
     "hot_push_groups": "推送目标群号（逗号分隔）",
     "hot_push_platform": "推送平台 ID（默认 onebot）",
+    "weekly_report_enable": "是否开启每周点歌排行榜推送",
+    "weekly_report_weekday": "周报推送星期（1=周一 … 7=周日）",
+    "weekly_report_time": "周报推送时间 HH:MM",
+    "weekly_report_groups": "周报目标群号（逗号分隔，留空自动推所有有点歌记录的群）",
     "cache_max_mb": "语音缓存上限 MB",
     "netease_cookie": "网易云登录 Cookie（浏览器登录 music.163.com 后复制，含 MUSIC_U；可解锁 VIP 歌曲直链）",
 }
@@ -113,6 +117,7 @@ class MusicPlugin(Star):
         self._queue_last: dict[str, float] = {}
         self._queue_task: asyncio.Task | None = None
         self._push_task: asyncio.Task | None = None
+        self._report_task: asyncio.Task | None = None
         # 网易云登录：进行中的扫码任务与验证码会话（group_id -> dict）
         self._login_tasks: dict[str, asyncio.Task] = {}
         self._sms_sessions: dict[str, dict] = {}
@@ -136,6 +141,9 @@ class MusicPlugin(Star):
         # WebUI 直接配置 hot_push_enable 时也要启动热推任务
         if self.config.get("hot_push_enable", False):
             self._ensure_push_task()
+        # 周报定时推送
+        if self.stats is not None and self.config.get("weekly_report_enable", True):
+            self._ensure_report_task()
         logger.info("【CUSTOM-MUSIC】插件初始化完成")
 
     # ---------- 工具 ----------
@@ -297,6 +305,10 @@ class MusicPlugin(Star):
     def _ensure_push_task(self):
         if self._push_task is None or self._push_task.done():
             self._push_task = asyncio.create_task(self._hot_push_loop())
+
+    def _ensure_report_task(self):
+        if self._report_task is None or self._report_task.done():
+            self._report_task = asyncio.create_task(self._report_push_loop())
 
     # ---------- 发送 ----------
 
@@ -801,6 +813,90 @@ class MusicPlugin(Star):
             except Exception as e:
                 logger.warning(f"定时热门推送失败 group={gid}: {e}")
 
+    # ---------- 点歌周报 ----------
+
+    async def _report_push_loop(self):
+        """周报推送：每 30 秒检查一次，到达配置星期/时间后向目标群推送"""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await self._report_push_once()
+            except Exception as e:
+                logger.warning(f"定时周报推送失败: {e}")
+
+    def _report_target_groups(self) -> list[str]:
+        """周报目标群：优先配置指定；为空时自动使用所有有点歌记录的群"""
+        groups = [
+            g.strip()
+            for g in str(self._cfg("weekly_report_groups", "")).replace("，", ",").split(",")
+            if g.strip().isdigit()
+        ]
+        if groups:
+            return groups
+        if self.stats is not None:
+            return self.stats.active_groups()
+        return []
+
+    def _weekly_report_text(self, group_id: str = "") -> str:
+        """构建周报文本（group_id 为空时为全局榜单，否则为群内榜单）"""
+        top = (
+            self.stats.top_songs_by_group(group_id, limit=10, days=7)
+            if group_id
+            else self.stats.top_songs(limit=10, days=7)
+        )
+        total = (
+            self.stats.group_totals(group_id, days=7)
+            if group_id
+            else sum(s["score"] for s in self.stats.top_songs(limit=100, days=7))
+        )
+        lines = [
+            "📊 点歌周报（近 7 天）",
+            "━━━━━━━━━━━━━━━━━━",
+            f"🎵 本周共点歌 {total} 次",
+            "",
+            "🏆 最热歌曲 Top 10:",
+        ]
+        for i, s in enumerate(top, 1):
+            lines.append(f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）")
+        if not top:
+            lines.append("（本周还没有人点歌～快去点一首吧）")
+        lines.append("")
+        lines.append("💡 查看其他维度: /点歌 统计 周/月/我/人/群")
+        return "\n".join(lines)
+
+    async def _report_push_once(self):
+        """到达配置的星期与时间后推送周报（同周同群仅一次，由 push_state 保证）"""
+        if self.stats is None or not self._cfg("weekly_report_enable", True):
+            return
+        target_time = str(self._cfg("weekly_report_time", "20:00")).strip()
+        now = time.strftime("%H:%M")
+        if now < target_time:
+            return
+        # 星期语义：1=周一 … 7=周日（与 Python weekday() 0-6 对齐）
+        weekday_cfg = self._safe_int("weekly_report_weekday", 7, "")
+        weekday = datetime.now().weekday() + 1
+        if weekday != weekday_cfg:
+            return
+        groups = self._report_target_groups()
+        if not groups:
+            return
+        platform = str(self._cfg("hot_push_platform", "onebot")).strip() or "onebot"
+        iso = datetime.now().isocalendar()
+        for gid in groups:
+            key = f"week:{iso[0]}-W{iso[1]}:{gid}"
+            if self.push_state.already_pushed(key):
+                continue
+            try:
+                msg = self._weekly_report_text(gid)
+                ok = await self.context.send_message(
+                    f"{platform}:GroupMessage:{gid}", MessageChain([Plain(msg)])
+                )
+                if ok:
+                    self.push_state.mark_pushed(key)
+                    logger.info(f"周报推送成功: group={gid}")
+            except Exception as e:
+                logger.warning(f"周报推送失败 group={gid}: {e}")
+
     # ---------- 指令 ----------
 
     @filter.command(ORDER_COMMAND, alias=set(DEFAULT_ORDER_ALIASES), priority=1000)
@@ -820,6 +916,11 @@ class MusicPlugin(Star):
             if kw == "统计" or kw.startswith("统计 "):
                 extra = kw[2:].strip() if kw.startswith("统计") else ""
                 return await self._do_stats(event, extra)
+            # 周报：手动查看近 7 天点歌排行（群内=群榜，私聊=总榜）
+            if kw in ("周报", "周榜"):
+                if self.stats is None:
+                    return self._send_text(event, "统计功能未启用（enable_stats=False）")
+                return self._send_text(event, self._weekly_report_text(group_id))
             # 批量点歌：/点歌 批量 歌1，歌2，歌3
             if kw in ("批量", "连播", "多首") or kw.startswith(("批量 ", "连播 ", "多首 ")):
                 names = kw.split(maxsplit=1)[1].strip() if " " in kw else ""
@@ -1254,6 +1355,9 @@ class MusicPlugin(Star):
             self._sync_order_aliases()
         if key in ("hot_push_enable", "hot_push_time", "hot_push_groups"):
             self._ensure_push_task()
+        if key in ("weekly_report_enable", "weekly_report_time", "weekly_report_weekday", "weekly_report_groups"):
+            if self.stats is not None:
+                self._ensure_report_task()
         return self._send_text(event, f"✅ 已更新全局 {key} = {value}（重启后若想保留请同步修改 WebUI 配置）")
 
     def _show_queue(self, event, group_id: str) -> MessageEventResult:
@@ -1297,7 +1401,7 @@ class MusicPlugin(Star):
             for task in list(self._login_tasks.values()):
                 if not task.done():
                     task.cancel()
-            for task in (self._queue_task, self._push_task):
+            for task in (self._queue_task, self._push_task, self._report_task):
                 if task is not None and not task.done():
                     task.cancel()
         except Exception:

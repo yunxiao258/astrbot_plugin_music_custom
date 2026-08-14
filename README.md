@@ -34,6 +34,12 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 - `/点歌 统计 我`：个人最爱 Top 5
 - `/点歌 统计 人`：点歌达人 Top 10
 - `/点歌 统计 群`：本群最受欢迎 Top 10
+- `/点歌 周报`：手动查看近 7 天排行榜（群内=本群周榜，私聊=总榜）
+
+### 周报推送（新）
+- 每周自动向目标群推送点歌周报：本周点歌总数 + 本群最热 Top 10
+- 配置：`weekly_report_enable`（默认开）、`weekly_report_weekday`（1=周一…7=周日，默认 7）、`weekly_report_time`（默认 20:00）、`weekly_report_groups`（留空自动推送到所有有点歌记录的群）
+- 同周同群仅推送一次，重启不重复
 
 ### 管理（管理员）
 - `/song block 词`：屏蔽歌曲（匹配标题/歌手，搜索与播放双拦截）
@@ -69,6 +75,7 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 - `aliases`：自定义点歌指令别名（用户以 `/别名` 发送，配置时写别名本体，逗号分隔）
 - `enable_artwork` / `enable_lyric`：封面图 / 歌词开关
 - `hot_push_enable` / `hot_push_time` / `hot_push_groups` / `hot_push_platform`：定时热门推送
+- `weekly_report_enable` / `weekly_report_weekday` / `weekly_report_time` / `weekly_report_groups`：每周点歌周报推送
 - `cache_max_mb`：语音缓存目录上限（自动清理最旧文件）
 - `enable_card`：是否发送 QQ 音乐卡片
 - `frequency_seconds`：每人点歌冷却秒数
