@@ -210,3 +210,29 @@ class PushState(JsonStore):
                 for k in sorted(self.data)[: len(self.data) - 60]:
                     self.data.pop(k, None)
             self.save()
+
+
+class PlatformLearner(JsonStore):
+    """platform_map.json：群号 -> 平台实例 ID（定时热门推送/周报推送使用，点歌时自动学习）"""
+
+    def __init__(self, data_dir: str) -> None:
+        super().__init__(os.path.join(data_dir, "platform_map.json"), {})
+
+    def get(self, group_id: str) -> str:
+        with self._lock:
+            v = self.data.get(str(group_id))
+            return v if isinstance(v, str) else ""
+
+    def learn(self, group_id: str, platform_id: str) -> bool:
+        """记录群→平台实例 ID 映射，值变化时持久化；返回是否有变化"""
+        with self._lock:
+            key = str(group_id)
+            if self.data.get(key) == platform_id:
+                return False
+            self.data[key] = platform_id
+            # 只保留最近 200 个群，防止无限膨胀
+            if len(self.data) > 200:
+                for k in list(self.data)[: len(self.data) - 200]:
+                    self.data.pop(k, None)
+            self.save()
+            return True

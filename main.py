@@ -27,7 +27,7 @@ from .netease_login import (
 )
 from .sources import SourceManager
 from .stats import MusicStats
-from .store import BlockedStore, Favorites, GroupConfigs, PushState, QuotaStore
+from .store import BlockedStore, Favorites, GroupConfigs, PlatformLearner, PushState, QuotaStore
 from .voice import convert_to_amr, download_audio
 
 logger = get_logger()
@@ -70,7 +70,7 @@ ADMIN_KEYS = {
     "hot_push_enable": "是否开启定时热门推送",
     "hot_push_time": "定时推送时间 HH:MM",
     "hot_push_groups": "推送目标群号（逗号分隔）",
-    "hot_push_platform": "推送平台 ID（默认 onebot）",
+    "hot_push_platform": "推送平台 ID（留空自动学习，点歌时按群自动记录；旧值 onebot 已弃用）",
     "weekly_report_enable": "是否开启每周点歌排行榜推送",
     "weekly_report_weekday": "周报推送星期（1=周一 … 7=周日）",
     "weekly_report_time": "周报推送时间 HH:MM",
@@ -110,6 +110,7 @@ class MusicPlugin(Star):
         self.quota = QuotaStore(self.data_dir)
         self.blocked = BlockedStore(self.data_dir)
         self.push_state = PushState(self.data_dir)
+        self._learned = PlatformLearner(self.data_dir)
         self._pending: dict[str, dict] = {}   # group_id -> {user_id: {mode, items, page, ts, kw, quality}}
         self._last_order: dict[str, float] = {}  # user_id -> 上次点歌时间戳
         # 播放队列：group_id -> [队列项]
@@ -759,6 +760,25 @@ class MusicPlugin(Star):
 
     # ---------- 定时热门推送 ----------
 
+    def _learn_platform(self, group_id: str, platform_id: str) -> None:
+        """从群聊事件学习"群 → 平台实例 ID"映射（定时推送定位平台用）"""
+        if not group_id or not platform_id:
+            return
+        try:
+            self._learned.learn(group_id, platform_id)
+        except Exception as e:
+            logger.warning(f"学习平台映射失败: {e}")
+
+    def _platform_for_group(self, group_id: str) -> str | None:
+        """推送平台解析：群内学习记录优先；其次显式配置（跳过已弃用的 onebot/default 占位值）；未知返回 None"""
+        learned = self._learned.get(group_id)
+        if learned:
+            return learned
+        cfg = str(self._cfg("hot_push_platform", "")).strip()
+        if cfg and cfg not in ("onebot", "default"):
+            return cfg
+        return None
+
     async def _hot_push_loop(self):
         """定时热门推送：每 30 秒检查一次，到达配置时间后向目标群推送"""
         while True:
@@ -779,7 +799,6 @@ class MusicPlugin(Star):
         groups = [g.strip() for g in str(self._cfg("hot_push_groups", "")).replace("，", ",").split(",") if g.strip().isdigit()]
         if not groups:
             return
-        platform = str(self._cfg("hot_push_platform", "onebot")).strip() or "onebot"
         today = time.strftime("%Y-%m-%d")
         # 取热门榜单
         items = []
@@ -803,6 +822,13 @@ class MusicPlugin(Star):
         for gid in groups:
             key = f"{today}:{gid}"
             if self.push_state.already_pushed(key):
+                continue
+            platform = self._platform_for_group(gid)
+            if not platform:
+                logger.warning(
+                    f"定时热门推送跳过 group={gid}: 未配置推送平台（请在群内点歌自动学习，"
+                    "或配置 hot_push_platform 为平台实例 ID）"
+                )
                 continue
             session = f"{platform}:GroupMessage:{gid}"
             try:
@@ -880,11 +906,17 @@ class MusicPlugin(Star):
         groups = self._report_target_groups()
         if not groups:
             return
-        platform = str(self._cfg("hot_push_platform", "onebot")).strip() or "onebot"
         iso = datetime.now().isocalendar()
         for gid in groups:
             key = f"week:{iso[0]}-W{iso[1]}:{gid}"
             if self.push_state.already_pushed(key):
+                continue
+            platform = self._platform_for_group(gid)
+            if not platform:
+                logger.warning(
+                    f"周报推送跳过 group={gid}: 未配置推送平台（请在群内点歌自动学习，"
+                    "或配置 hot_push_platform 为平台实例 ID）"
+                )
                 continue
             try:
                 msg = self._weekly_report_text(gid)
@@ -908,6 +940,8 @@ class MusicPlugin(Star):
         """点歌主入口：点歌 [歌名|随机|热门|统计|收藏|排队|链接|歌词|高清|下一页]（标准指令，需 @机器人或唤醒词）"""
         kw = song_name.strip().strip("，。！？!?")
         group_id = str(event.get_group_id() or "")
+        if group_id:
+            self._learn_platform(group_id, str(event.get_platform_id() or ""))
         try:
             if not kw or kw in ("随机", "随便", "来一首"):
                 return await self._do_random(event)

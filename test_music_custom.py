@@ -442,6 +442,8 @@ class TestNewFeatures(unittest.TestCase):
         async def scenario():
             p = make_plugin(weekly_report_enable=True, weekly_report_time="00:00")
             p.config["weekly_report_weekday"] = datetime.now().weekday() + 1
+            p._learned = self._learned_stub({})
+            p._platform_for_group = lambda gid: "蓝轩宇"
             self._seed_stats(p)
             sent = []
             pushed = []
@@ -472,6 +474,7 @@ class TestNewFeatures(unittest.TestCase):
         async def scenario():
             p = make_plugin(weekly_report_enable=True, weekly_report_time="00:00")
             p.config["weekly_report_weekday"] = (datetime.now().weekday() + 1) % 7 + 1
+            p._learned = self._learned_stub({})
             sent = []
 
             async def fake_send(session, chain):
@@ -563,6 +566,48 @@ class TestNewFeatures(unittest.TestCase):
         result = asyncio.run(p._do_hot(FakeEvent("u1")))
         self.assertIn("热歌", self._text(result))
         self.assertEqual(state["used"], 1)
+
+    # ==================== 推送平台解析（定时热门/周报） ====================
+
+    def _learned_stub(self, data):
+        """内存平台学习替身（避免测试写入真实 platform_map.json）"""
+        return SimpleNamespace(
+            data=data,
+            get=lambda g: data.get(str(g), ""),
+            learn=lambda g, pid: data.__setitem__(str(g), pid) or True,
+        )
+
+    def test_platform_unknown_returns_none(self):
+        p = self._plugin()
+        p._learned = self._learned_stub({})
+        self.assertIsNone(p._platform_for_group("12345"))
+        # 配置为已弃用的占位值同样视为未知
+        p.config["hot_push_platform"] = "onebot"
+        self.assertIsNone(p._platform_for_group("12345"))
+
+    def test_platform_explicit_config_used(self):
+        p = self._plugin()
+        p._learned = self._learned_stub({})
+        p.config["hot_push_platform"] = "蓝轩宇"
+        self.assertEqual(p._platform_for_group("12345"), "蓝轩宇")
+
+    def test_platform_learned_wins_over_config(self):
+        p = self._plugin()
+        p._learned = self._learned_stub({"12345": "云晓"})
+        p.config["hot_push_platform"] = "蓝轩宇"
+        self.assertEqual(p._platform_for_group("12345"), "云晓")
+
+    def test_learn_platform_records_and_saves(self):
+        p = self._plugin()
+        data = {}
+        p._learned = self._learned_stub(data)
+        p._learn_platform("12345", "唐舞麟")
+        self.assertEqual(data["12345"], "唐舞麟")
+        # 空值不记录
+        p._learn_platform("99999", "")
+        self.assertNotIn("99999", data)
+        p._learn_platform("", "蓝轩宇")
+        self.assertNotIn("", data)
 
 
 class TestAdminCommands(unittest.TestCase):
