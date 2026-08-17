@@ -1377,7 +1377,7 @@ class MusicPlugin(Star):
                 value = int(value)
             except ValueError:
                 return self._send_text(event, "该项需要数字")
-        if key in ("enable_card", "enable_artwork", "enable_lyric", "hot_push_enable"):
+        if key in ("enable_card", "enable_artwork", "enable_lyric", "hot_push_enable", "weekly_report_enable"):
             value = str(value).lower() in ("1", "true", "on", "yes")
         if per_group:
             self.groups.set_key(group_id, key, value)
