@@ -159,7 +159,7 @@ class MusicStats:
             gs = set()
             for e in self.data["songs"].values():
                 gs.update(str(g) for g in e.get("groups", {}).keys())
-            return [g for g in gs if g.isdigit()]
+            return sorted(g for g in gs if g.isdigit())
 
     def top_users(self, limit: int = 10, days: int = 0) -> list[dict]:
         since = "" if not days else self._since_date(days)

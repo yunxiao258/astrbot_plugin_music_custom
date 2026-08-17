@@ -465,7 +465,8 @@ class TestNewFeatures(unittest.TestCase):
         # 同周同群只推一次
         self.assertEqual(len(sent), 2)
         self.assertEqual(len(pushed), 2)
-        self.assertTrue(sent[0][0].endswith(":10001"))
+        # 推送顺序与目标群顺序无关：按群号校验
+        self.assertEqual(sorted(s for s, _ in sent), ["蓝轩宇:GroupMessage:10001", "蓝轩宇:GroupMessage:20002"])
         self.assertIn("晴天", sent[0][1])
 
     def test_report_push_skipped_wrong_weekday(self):
