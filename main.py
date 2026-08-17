@@ -350,7 +350,8 @@ class MusicPlugin(Star):
                     return None
             if not await convert_to_amr(mp3_path, amr_path):
                 return None
-            self._cleanup_cache()
+            # 缓存清理含递归扫描/删除文件，放入线程避免阻塞事件循环
+            await asyncio.to_thread(self._cleanup_cache)
             return Record.fromFileSystem(amr_path)
         except Exception as e:
             logger.warning(f"点歌语音 amr 发送失败: {e}")
