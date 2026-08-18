@@ -2,13 +2,26 @@
 
 import requests
 
-from ..log import get_logger
-from .base import MusicSource
-from .bilibili import BilibiliSource
-from .kugou import KugouSource
-from .kuwo import KuwoSource
-from .netease import NeteaseSource
-from .qqmusic import QQMusicSource
+try:
+    from ..log import get_logger
+    from .base import MusicSource
+    from .bilibili import BilibiliSource
+    from .kugou import KugouSource
+    from .kuwo import KuwoSource
+    from .netease import NeteaseSource
+    from .qqmusic import QQMusicSource
+except ImportError:  # unittest discover 顶层导入本包时无父包上下文
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from log import get_logger
+    from base import MusicSource
+    from bilibili import BilibiliSource
+    from kugou import KugouSource
+    from kuwo import KuwoSource
+    from netease import NeteaseSource
+    from qqmusic import QQMusicSource
 
 logger = get_logger()
 

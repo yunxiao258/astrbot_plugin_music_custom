@@ -5,8 +5,12 @@ import json
 import re
 import time
 
-from ..log import get_logger
-from .base import MusicItem, MusicSource
+try:
+    from ..log import get_logger
+    from .base import MusicItem, MusicSource
+except ImportError:  # unittest discover 顶层导入场景
+    from log import get_logger
+    from base import MusicItem, MusicSource
 
 logger = get_logger()
 
