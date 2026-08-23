@@ -118,6 +118,42 @@ class NeteaseSource(MusicSource):
             )
         return [_parse_song(s) for s in songs]
 
+    async def get_hot_comment(self, item: MusicItem, max_len: int = 120) -> str:
+        """获取歌曲网易云热门评论第一条（公开接口，无需登录）；失败返回空串。
+
+        接口：/api/v1/resource/comments/R_SO_4_{song_id}?limit=1&offset=0
+        hotComments[0] 为官方热评，content 字段为评论文本。
+        """
+        def _do():
+            r = self.session.get(
+                f"https://music.163.com/api/v1/resource/comments/R_SO_4_{item.id}",
+                params={"limit": 1, "offset": 0},
+                headers=self._headers(),
+                timeout=10,
+            )
+            return r.json()
+
+        try:
+            j = await asyncio.to_thread(_do)
+        except Exception as e:
+            logger.warning(f"[netease] 热评获取异常 {item.id}: {e}")
+            return ""
+        if not isinstance(j, dict):
+            return ""
+        hot = j.get("hotComments") or []
+        comment = ""
+        if hot and isinstance(hot[0], dict):
+            comment = str(hot[0].get("content") or "").strip()
+        if not comment:
+            # 无热评时回退最新评论
+            newest = j.get("comments") or []
+            if newest and isinstance(newest[0], dict):
+                comment = str(newest[0].get("content") or "").strip()
+        if not comment:
+            return ""
+        comment = re.sub(r"\s+", " ", comment)
+        return comment[:max_len] + ("…" if len(comment) > max_len else "")
+
     async def get_lyric(self, item: MusicItem, max_lines: int = 4) -> str:
         """获取逐字歌词，截取前若干有效行返回纯文本；失败返回空串"""
         def _do():

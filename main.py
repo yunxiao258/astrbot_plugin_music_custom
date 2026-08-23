@@ -93,7 +93,7 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/链接解析", "1.6.1")
+@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/热评伴唱/个性化推荐", "1.7.0")
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
@@ -419,7 +419,7 @@ class MusicPlugin(Star):
 
     # ---------- 播放主流程 ----------
 
-    async def _play_item(self, event, item, keyword: str = "", sess: dict | None = None) -> MessageEventResult | None:
+    async def _play_item(self, event, item, keyword: str = "", sess: dict | None = None, tail_segs: list | None = None) -> MessageEventResult | None:
         """对选中的歌曲执行：语音 → 卡片/链接 → 歌词 → 统计"""
         group_id = str(event.get_group_id() or "")
         # 屏蔽词拦截（防收藏/队列绕过）
@@ -446,23 +446,29 @@ class MusicPlugin(Star):
         if url:
             voice_res = await self._try_voice(event, url, item)
             if voice_res is _URL_SENT:
-                # 已直接发送语音：先发点歌人标识，再补歌词
+                # URL 直发成功：先明确点歌标识再补歌词
                 logger.info(f"[music] 语音 URL 直发成功: {item.title}")
                 if self._cfg("enable_lyric", True):
                     await event.send(MessageChain([Plain(head)]))
                     await self._send_lyric(event, item)
                 else:
                     await event.send(MessageChain([Plain(head)]))
+                if tail_segs:
+                    try:
+                        await event.send(MessageChain(tail_segs))
+                    except Exception:
+                        pass
                 self._record(event, item, group_id)
                 return None
             if isinstance(voice_res, Record):
-                # amr 语音已就绪
-                logger.info(f"[music] amr 转码语音发送成功: {item.title}")
+                # amr 转换成功，可发送语音
+                logger.info(f"[music] amr 转码并发送成功: {item.title}")
                 segs = []
                 if self._cfg("enable_lyric", True):
                     segs.append(Plain(head))
                     segs.extend(await self._lyric_segs(item))
                 segs.append(voice_res)
+                segs.extend(tail_segs or [])
                 self._record(event, item, group_id)
                 return event.chain_result(segs)
             # 语音失败走卡片回退（卡片本身可能带封面/链接）
@@ -475,6 +481,7 @@ class MusicPlugin(Star):
         if self._cfg("enable_lyric", True):
             segs.extend(await self._lyric_segs(item))
         segs.extend(chain)
+        segs.extend(tail_segs or [])
         self._record(event, item, group_id)
         return event.chain_result(segs)
 
@@ -694,6 +701,97 @@ class MusicPlugin(Star):
         for i, s in enumerate(top, 1):
             lines.append(f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）")
         return self._send_text(event, "\n".join(lines))
+
+    # ---------- 热评伴唱 / 个性化推荐（v1.7.0） ----------
+
+    async def _do_hot_comment(self, event, keyword: str) -> MessageEventResult | None:
+        """热评点歌：播放网易云版本歌曲并附上热门评论（公开接口，无需登录）"""
+        group_id = str(event.get_group_id() or "")
+        if not keyword:
+            return self._send_text(
+                event,
+                "热评点歌用法: /点歌 热评 <歌名>\n例如: /点歌 热评 晴天\n播放歌曲的同时附上网易云热评（仅网易源歌曲支持）",
+            )
+        if not self._check_frequency(str(event.get_sender_id()), group_id):
+            return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
+        ok, hint = self._check_quota(event, group_id)
+        if not ok:
+            return self._send_text(event, hint)
+        results = await self.sources.search_all(keyword, limit=3)
+        items = self._merge_results(results, keyword)
+        items = [it for it in items if not self.blocked.is_blocked(it)]
+        netease_item = next((it for it in items if it.source == "netease"), None)
+        if netease_item is None:
+            return self._send_text(
+                event,
+                f"?? 没找到「{keyword}」的网易云版本，热评功能仅网易源支持，试试普通搜索吧：/点歌 {keyword}",
+            )
+        comment = ""
+        src = self.sources.get("netease")
+        if src is not None:
+            try:
+                comment = await src.get_hot_comment(netease_item)
+            except Exception as e:
+                logger.warning(f"[music] 热评获取失败: {e}")
+        tail_segs: list = []
+        head_text = f"💬 来自「{netease_item.title}」的网易云热评"
+        if comment:
+            tail_segs.append(Plain(f"{head_text}\n「{comment}」"))
+        else:
+            tail_segs.append(Plain("?? 这首歌暂时没有热评，安静听完吧～"))
+        return await self._play_item(event, netease_item, keyword, tail_segs=tail_segs)
+
+    async def _do_recommend(self, event) -> MessageEventResult | None:
+        """个性化推荐：基于个人点歌历史挑歌手，推荐没听过的同风格新歌"""
+        group_id = str(event.get_group_id() or "private")
+        user_id = str(event.get_sender_id())
+        ok, hint = self._check_quota(event, str(event.get_group_id() or ""))
+        if not ok:
+            return self._send_text(event, hint)
+        if self.stats is None:
+            return self._send_text(event, "统计功能未启用（enable_stats=False），无法生成推荐")
+        top = self.stats.top_songs_by_user(user_id, 10)
+        artists: list[str] = []
+        seen: set = set()
+        played_titles: set = set()
+        for s in top:
+            a = str(s.get("artist") or "").strip()
+            key = self._norm(a)
+            if a and key and not key.isdigit() and key not in seen:
+                seen.add(key)
+                artists.append(a)
+            t = self._norm(s.get("title", ""))
+            if t:
+                played_titles.add(t)
+            if len(artists) >= 5:
+                break
+        if not artists:
+            return self._send_text(
+                event,
+                "?? 你还没有点过歌，暂时无法生成口味推荐。\n先点几首吧：/点歌 <歌名>，之后再来 /点歌 推荐",
+            )
+        artist = random.choice(artists)
+        results = await self.sources.search_all(artist, limit=8)
+        items = self._merge_results(results, artist)
+        items = [it for it in items if not self.blocked.is_blocked(it)]
+        fresh = [it for it in items if self._norm(it.title) not in played_titles]
+        if not fresh:
+            return self._send_text(
+                event,
+                f"🎯 你常听「{artist}」，但暂时没挖到没听过的新歌了。换个时间再来，或直接搜索：/点歌 <歌名>",
+            )
+        fresh = fresh[:6]
+        name = event.get_sender_name() or f"用户 {user_id}"
+        head = (
+            f"🎯 根据你的点歌记录发现你常听「{artist}」，"
+            f"{name}，这几首同风格的你还没点过，回复序号试试："
+        )
+        self._pending.setdefault(group_id, {})[user_id] = {
+            "mode": "search", "items": fresh, "page": 1, "ts": time.time(),
+            "kw": artist, "quality": "", "group_id": group_id,
+        }
+        page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
+        return self._send_text(event, self._fmt_list(page_items, page, total, head))
 
     # ---------- 播放队列 ----------
 
@@ -956,6 +1054,15 @@ class MusicPlugin(Star):
                 if self.stats is None:
                     return self._send_text(event, "统计功能未启用（enable_stats=False）")
                 return self._send_text(event, self._weekly_report_text(group_id))
+            # 热评点歌：/点歌 热评 <歌名>（播放 + 网易云热评）
+            if kw == "热评" or kw.startswith(("热评 ", "热评:", "热评：")) or kw.startswith("热评论"):
+                sub = re.sub(r"^热评论?[\s:：]*", "", kw).strip()
+                return await self._do_hot_comment(event, sub)
+            # 个性化推荐：/点歌 推荐
+            if kw in ("推荐", "猜你喜欢", "个性化"):
+                if not self._check_frequency(str(event.get_sender_id()), group_id):
+                    return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
+                return await self._do_recommend(event)
             # 批量点歌：/点歌 批量 歌1，歌2，歌3
             if kw in ("批量", "连播", "多首") or kw.startswith(("批量 ", "连播 ", "多首 ")):
                 names = kw.split(maxsplit=1)[1].strip() if " " in kw else ""
