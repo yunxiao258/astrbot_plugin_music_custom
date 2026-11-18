@@ -9,12 +9,11 @@ import time
 import unittest
 from types import SimpleNamespace
 
-sys.path.insert(0, r"D:\astrbot\data\plugins")
-sys.path.insert(0, r"D:\astrbot\data\plugins\astrbot_plugin_music_custom")
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(PLUGIN_DIR))
+sys.path.insert(0, PLUGIN_DIR)
 
 from astrbot_plugin_music_custom.main import MusicPlugin  # noqa: E402
-
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class FakeEvent:

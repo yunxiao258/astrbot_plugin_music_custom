@@ -2,12 +2,15 @@
 """music_custom 新功能测试（v1.7.0）：热评伴唱、个性化推荐。"""
 
 import asyncio
+import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
-sys.path.insert(0, r"D:\astrbot\data\plugins")
-sys.path.insert(0, r"D:\astrbot\data\plugins\astrbot_plugin_music_custom")
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_PLUGIN_DIR))
+sys.path.insert(0, _PLUGIN_DIR)
 
 from astrbot_plugin_music_custom.main import MusicPlugin  # noqa: E402
 from sources.base import MusicItem  # noqa: E402
@@ -202,6 +205,40 @@ class TestRecommend(unittest.TestCase):
         p.stats = None
         text = chain_text(run(p.order_music(FakeEvent("/点歌 推荐"), "推荐")))
         self.assertIn("未启用", text)
+
+
+class TestV171LifecycleAndStatus(unittest.TestCase):
+    def test_sync_init_without_loop_does_not_crash(self):
+        tmp = tempfile.mkdtemp(prefix="music_init_")
+        p = MusicPlugin(context=None, config={"weekly_report_enable": True, "hot_push_enable": True, "voice_mode": "off"}, data_dir=tmp)
+        self.assertIsNone(p._report_task)
+        self.assertIsNone(p._push_task)
+
+        async def scenario():
+            await p.initialize()
+            self.assertIsNotNone(p._report_task)
+            self.assertIsNotNone(p._push_task)
+            await p.terminate()
+
+        asyncio.run(scenario())
+
+    def test_song_status_and_help_and_nondigit_voice(self):
+        p = make_plugin()
+        ev = FakeEvent("/song status", sender_id="u_non_digit")
+        txt = chain_text(run(p.song_admin(ev)))
+        self.assertIn("点歌插件状态 v1.7.1", txt)
+        self.assertIn("启用音乐源", txt)
+        ev_help = FakeEvent("/song help")
+        help_txt = chain_text(run(p.song_admin(ev_help)))
+        self.assertIn("/点歌 热评", help_txt)
+        self.assertIn("/song status", help_txt)
+        # 非数字 sender_id 私聊语音不抛 ValueError，直接回退
+        p.config["voice_mode"] = "url"
+        ev.bot = mock.MagicMock()
+        ev.get_message_type = lambda: "FriendMessage"
+        ev._gid = ""
+        res = run(p._try_voice(ev, "http://example.com/1.mp3", make_item()))
+        self.assertIsNone(res)
 
 
 if __name__ == "__main__":

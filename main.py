@@ -93,15 +93,23 @@ _QUALITY_CHAIN = {
 }
 
 
-@register("astrbot_plugin_music_custom", "Administrator", "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/热评伴唱/个性化推荐", "1.7.0")
+PLUGIN_VERSION = "1.7.1"
+PLUGIN_AUTHOR = "云晓"
+
+
+@register("astrbot_plugin_music_custom", PLUGIN_AUTHOR, "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/热评伴唱/个性化推荐", PLUGIN_VERSION)
 class MusicPlugin(Star):
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
-    def __init__(self, context: Context, config: AstrBotConfig = None):
+    def __init__(self, context: Context, config: AstrBotConfig = None, data_dir: str | None = None):
         super().__init__(context)
         self.config = config or {}
         # 数据目录：AstrBot 标准 plugin_data（仅读写插件自身文件，绝不触碰全局配置）
-        self.data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "plugin_data", "astrbot_plugin_music_custom")
+        self.data_dir = data_dir or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "plugin_data",
+            "astrbot_plugin_music_custom",
+        )
         os.makedirs(self.data_dir, exist_ok=True)
         self.sources = SourceManager(self.config)
         self.stats = MusicStats(self.data_dir) if self.config.get("enable_stats", True) else None
@@ -300,16 +308,36 @@ class MusicPlugin(Star):
         return "\n".join(lines)
 
     def _ensure_queue_task(self):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
         if self._queue_task is None or self._queue_task.done():
             self._queue_task = asyncio.create_task(self._queue_loop())
 
     def _ensure_push_task(self):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
         if self._push_task is None or self._push_task.done():
             self._push_task = asyncio.create_task(self._hot_push_loop())
 
     def _ensure_report_task(self):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
         if self._report_task is None or self._report_task.done():
             self._report_task = asyncio.create_task(self._report_push_loop())
+
+    async def initialize(self):
+        """AstrBot 异步初始化钩子：在运行中事件循环内确保定时任务启动"""
+        self._sync_order_aliases()
+        if self.config.get("hot_push_enable", False):
+            self._ensure_push_task()
+        if self.stats is not None and self.config.get("weekly_report_enable", True):
+            self._ensure_report_task()
 
     # ---------- 发送 ----------
 
@@ -331,9 +359,11 @@ class MusicPlugin(Star):
                 seg = {"type": "record", "data": {"file": url}}
                 if event.get_message_type() == MessageType.GROUP_MESSAGE:
                     await bot.send_group_msg(group_id=int(group_id), message=[seg])
-                else:
-                    await bot.send_private_msg(user_id=int(event.get_sender_id()), message=[seg])
-                return _URL_SENT
+                    return _URL_SENT
+                sender_id = str(event.get_sender_id() or "")
+                if sender_id.isdigit():
+                    await bot.send_private_msg(user_id=int(sender_id), message=[seg])
+                    return _URL_SENT
             except Exception as e:
                 logger.warning(f"点歌语音 URL 直发失败，转 amr 模式: {e}")
         # amr 兜底：下载 → 转码 → 本地文件发送（命中缓存则跳过）
@@ -1342,6 +1372,8 @@ class MusicPlugin(Star):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
                 arg = (m.group(1) or "").strip()
                 return await self._do_netease_login(event, arg, user_id, group_id)
+            if re.match(r"^/?song\s+status$", text):
+                return self._send_text(event, self._status_text())
             # 帮助
             return self._send_text(event, self._help_text())
         finally:
@@ -1513,18 +1545,49 @@ class MusicPlugin(Star):
         lines.append("提示: /song queue clear 清空 · /song queue next 跳下一首")
         return self._send_text(event, "\n".join(lines))
 
+    def _status_text(self) -> str:
+        """输出插件运行状态摘要（源、队列、缓存与登录态）"""
+        sources_list = ", ".join(self.sources.order) or "无"
+        queued = sum(len(q) for q in self._queues.values())
+        has_cookie = "已配置" if (self._cfg("netease_cookie", "") or "").strip() else "未配置"
+        cache_files = 0
+        cache_bytes = 0
+        cache_dir = self._cache_dir()
+        if os.path.isdir(cache_dir):
+            for root, _, names in os.walk(cache_dir):
+                for fn in names:
+                    fp = os.path.join(root, fn)
+                    cache_files += 1
+                    try:
+                        cache_bytes += os.path.getsize(fp)
+                    except OSError:
+                        pass
+        return (
+            f"🎵 点歌插件状态 v{PLUGIN_VERSION}\n"
+            f"- 启用音乐源：{sources_list}\n"
+            f"- 语音模式：{self._cfg('voice_mode', 'url')} · 默认音质：{self._cfg('quality', 'standard')}\n"
+            f"- 网易云 Cookie：{has_cookie}\n"
+            f"- 播放队列：共 {queued} 首待播\n"
+            f"- 语音缓存：{cache_files} 个文件 / {cache_bytes / 1024 / 1024:.1f} MB（上限 {self._safe_int('cache_max_mb', 200)} MB）\n"
+            f"- 已学习群平台映射：{len(getattr(self._learned, 'data', {}) or {})} 个群"
+        )
+
     def _help_text(self) -> str:
         return (
-            "🎵 点歌插件使用说明\n"
+            f"🎵 点歌插件使用说明 v{PLUGIN_VERSION}\n"
             "使用方式：发送「/点歌 歌名」（需 @机器人 或唤醒词）\n"
             "/点歌 歌名 — 搜索点歌（回复序号播放，发「/点歌 下一页」翻页）\n"
-            "/点歌 随机 / 热门 / 统计 — 随机、榜单、统计\n"
+            "/点歌 热评 歌名 — 播放歌曲并附网易云热门评论\n"
+            "/点歌 推荐 — 按点歌历史个性推荐\n"
+            "/点歌 批量 歌1，歌2 — 连续点多首（最多 5 首）\n"
+            "/点歌 歌词 片段 / 点歌 歌词本 歌名 — 按歌词搜索 / 查看完整歌词\n"
+            "/点歌 随机 / 热门 / 周报 / 统计 — 随机、榜单、周榜、统计\n"
             "/点歌 统计 周/月/我/人/群 — 周榜/月榜/我的最爱/点歌达人/群内排行\n"
-            "/点歌 歌词 片段 — 按歌词搜索\n"
             "/点歌 高清 歌名 — 高音质搜索\n"
             "/点歌 收藏 歌名 / 点歌 排队 歌名 — 搜索后收藏/加入队列\n"
             "粘贴音乐链接 — 网易云/QQ音乐/B站 直解析播放\n"
             "回复「取消」— 退出当前选歌\n"
+            "/song status — 查看音源、缓存与队列状态\n"
             "/song fav — 查看收藏（回复序号播放，/song fav del 序号 删除）\n"
             "/song queue — 查看队列（clear 清空 / next 下一首）\n"
             "/song block 词 / unblock 词 / blocks — 屏蔽管理（管理员）\n"
