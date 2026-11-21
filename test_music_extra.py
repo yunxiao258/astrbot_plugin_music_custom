@@ -226,7 +226,7 @@ class TestV171LifecycleAndStatus(unittest.TestCase):
         p = make_plugin()
         ev = FakeEvent("/song status", sender_id="u_non_digit")
         txt = chain_text(run(p.song_admin(ev)))
-        self.assertIn("点歌插件状态 v1.7.1", txt)
+        self.assertIn("点歌插件状态 v1.8.0", txt)
         self.assertIn("启用音乐源", txt)
         ev_help = FakeEvent("/song help")
         help_txt = chain_text(run(p.song_admin(ev_help)))

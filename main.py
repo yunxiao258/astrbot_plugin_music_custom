@@ -1,4 +1,4 @@
-﻿"""AstrBot 群聊点歌插件：多音乐源聚合搜索、语音/卡片发送、选歌交互、统计、收藏、播放队列、链接解析、群独立配置"""
+"""AstrBot 群聊点歌插件：多音乐源聚合搜索、语音/卡片发送、选歌交互、统计、收藏、播放队列、链接解析、群独立配置"""
 
 import asyncio
 import math
@@ -93,12 +93,18 @@ _QUALITY_CHAIN = {
 }
 
 
-PLUGIN_VERSION = "1.7.1"
+try:
+    from .hub_bridge import HUB_PROTOCOL_VERSION, emit_hub_event
+except ImportError:
+    from hub_bridge import HUB_PROTOCOL_VERSION, emit_hub_event
+
+PLUGIN_VERSION = "1.8.0"
 PLUGIN_AUTHOR = "云晓"
 
 
 @register("astrbot_plugin_music_custom", PLUGIN_AUTHOR, "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/热评伴唱/个性化推荐", PLUGIN_VERSION)
 class MusicPlugin(Star):
+    HUB_PROTOCOL_VERSION = HUB_PROTOCOL_VERSION
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
     def __init__(self, context: Context, config: AstrBotConfig = None, data_dir: str | None = None):
@@ -247,11 +253,14 @@ class MusicPlugin(Star):
             return True, ""
         user_id = str(event.get_sender_id())
         today = time.strftime("%Y-%m-%d")
+        bonus_map = getattr(self, "_hub_bonus_quota", {})
+        bonus = int((bonus_map.get(today) or {}).get(user_id, 0))
+        eff_limit = limit + bonus
         used = self.quota.used_today(user_id, today)
-        if used >= limit:
-            return False, f"⚠️ 今日点歌已达上限（{limit} 次），明天再来吧～"
+        if used >= eff_limit:
+            return False, f"⚠️ 今日点歌已达上限（{eff_limit} 次），明天再来吧～"
         cnt = self.quota.consume(user_id, today)
-        remain = limit - cnt
+        remain = eff_limit - cnt
         hint = f"今日剩余 {remain} 次" if remain <= 3 else ""
         return True, hint
 
@@ -540,6 +549,7 @@ class MusicPlugin(Star):
         if self.stats is not None:
             try:
                 self.stats.record(item, str(event.get_sender_id()), event.get_sender_name() or "", group_id)
+                emit_hub_event("astrbot_plugin_music_custom", "music.played", {"user_id": str(event.get_sender_id() or ""), "nickname": str(event.get_sender_name() or ""), "group_id": group_id, "title": getattr(item, "name", str(item))}, self.context)
             except Exception as e:
                 logger.warning(f"记录点歌统计失败: {e}")
 
@@ -1611,3 +1621,32 @@ class MusicPlugin(Star):
                     task.cancel()
         except Exception:
             pass
+
+    def hub_status(self) -> dict:
+        today = time.strftime("%Y-%m-%d")
+        bonus_users = len((getattr(self, "_hub_bonus_quota", {}).get(today) or {}))
+        queued = sum(len(q) for q in self._queues.values())
+        return {
+            "version": PLUGIN_VERSION,
+            "status": "online",
+            "metrics": {"队列待播": queued, "今日运势加额人": bonus_users, "语音模式": str(self._cfg("voice_mode", "url"))},
+            "actions": ["get_stats", "grant_bonus_quota"],
+        }
+
+    async def hub_action(self, action: str, params: dict | None = None) -> dict:
+        p = params or {}
+        if action == "get_stats":
+            today = time.strftime("%Y-%m-%d")
+            return {"ok": True, "data": {"queued": sum(len(q) for q in self._queues.values()), "bonus_today": dict(getattr(self, "_hub_bonus_quota", {}).get(today) or {})}}
+        if action == "grant_bonus_quota":
+            uid = str(p.get("user_id", "")).strip()
+            bonus = max(1, int(p.get("bonus", 2)))
+            if not uid:
+                return {"ok": False, "error": "缺少 user_id"}
+            today = time.strftime("%Y-%m-%d")
+            if not hasattr(self, "_hub_bonus_quota"):
+                self._hub_bonus_quota = {}
+            day_map = self._hub_bonus_quota.setdefault(today, {})
+            day_map[uid] = int(day_map.get(uid, 0)) + bonus
+            return {"ok": True, "data": {"user_id": uid, "date": today, "bonus_total": day_map[uid]}}
+        return {"ok": False, "error": f"不支持的动作：{action}"}
