@@ -4,14 +4,12 @@ import ast
 import asyncio
 import json
 
+from astrbot.api import logger
+
 try:
-    from ..log import get_logger
     from .base import MusicItem, MusicSource
 except ImportError:  # unittest discover 顶层导入场景
-    from log import get_logger
     from base import MusicItem, MusicSource
-
-logger = get_logger()
 
 SEARCH_URL = "http://search.kuwo.cn/r.s"
 PLAY_URL = "http://antiserver.kuwo.cn/anti.s"

@@ -9,7 +9,7 @@ import time
 import unicodedata
 from datetime import datetime
 
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import MessageChain, MessageEventResult
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.message_components import Image, Music, Plain, Record
@@ -17,7 +17,6 @@ from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
-from .log import get_logger
 from .netease_login import (
     make_qrcode_image,
     qrcode_check,
@@ -29,8 +28,6 @@ from .sources import SourceManager
 from .stats import MusicStats
 from .store import BlockedStore, Favorites, GroupConfigs, PlatformLearner, PushState, QuotaStore
 from .voice import convert_to_amr, download_audio
-
-logger = get_logger()
 
 # 点歌标准指令名。
 # 注意：部署环境的 AstrBot wake_prefix 为 "/"，消息前缀会在唤醒阶段被剥离，
@@ -98,7 +95,7 @@ try:
 except ImportError:
     from hub_bridge import HUB_PROTOCOL_VERSION, emit_hub_event
 
-PLUGIN_VERSION = "1.8.0"
+PLUGIN_VERSION = "1.8.1"
 PLUGIN_AUTHOR = "云晓"
 
 
@@ -1159,7 +1156,6 @@ class MusicPlugin(Star):
         if not parts:
             return self._send_text(event, "批量点歌用法: /点歌 批量 歌1，歌2，歌3")
         parts = parts[:5]
-        user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id() or "private")
         limit = self._safe_int("search_limit", 5, group_id)
         played = []

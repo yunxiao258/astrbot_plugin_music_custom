@@ -3,14 +3,12 @@
 import asyncio
 import re
 
+from astrbot.api import logger
+
 try:
-    from ..log import get_logger
     from .base import MusicItem, MusicSource
 except ImportError:  # unittest discover 顶层导入场景
-    from log import get_logger
     from base import MusicItem, MusicSource
-
-logger = get_logger()
 
 SPI_URL = "https://api.bilibili.com/x/frontend/finger/spi"
 SEARCH_URL = "https://api.bilibili.com/x/web-interface/search/type"
@@ -59,7 +57,6 @@ class BilibiliSource(MusicSource):
 
     def _to_item(self, v: dict) -> MusicItem:
         title = self._clean_title(v.get("title", ""))
-        alias = re.search(r"《(.+?)》", title)
         duration = v.get("duration", 0) or 0
         if isinstance(duration, str) and ":" in duration:
             # B 站返回 "mm:ss" 格式时长

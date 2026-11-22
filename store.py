@@ -4,7 +4,6 @@ import dataclasses
 import json
 import os
 import threading
-import time
 
 from .sources.base import MusicItem
 

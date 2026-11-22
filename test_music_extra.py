@@ -12,7 +12,7 @@ _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_PLUGIN_DIR))
 sys.path.insert(0, _PLUGIN_DIR)
 
-from astrbot_plugin_music_custom.main import MusicPlugin  # noqa: E402
+from astrbot_plugin_music_custom.main import PLUGIN_VERSION, MusicPlugin  # noqa: E402
 from sources.base import MusicItem  # noqa: E402
 
 
@@ -226,7 +226,7 @@ class TestV171LifecycleAndStatus(unittest.TestCase):
         p = make_plugin()
         ev = FakeEvent("/song status", sender_id="u_non_digit")
         txt = chain_text(run(p.song_admin(ev)))
-        self.assertIn("点歌插件状态 v1.8.0", txt)
+        self.assertIn(f"点歌插件状态 v{PLUGIN_VERSION}", txt)
         self.assertIn("启用音乐源", txt)
         ev_help = FakeEvent("/song help")
         help_txt = chain_text(run(p.song_admin(ev_help)))

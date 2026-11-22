@@ -3,14 +3,12 @@
 import asyncio
 import re
 
+from astrbot.api import logger
+
 try:
-    from ..log import get_logger
     from .base import MusicItem, MusicSource
 except ImportError:  # unittest discover 顶层导入场景
-    from log import get_logger
     from base import MusicItem, MusicSource
-
-logger = get_logger()
 
 SEARCH_URL = "https://music.163.com/api/search/get/web"
 DETAIL_URL = "https://music.163.com/api/song/detail"

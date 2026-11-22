@@ -1,9 +1,9 @@
 """音乐源注册表与轮询调度"""
 
 import requests
+from astrbot.api import logger
 
 try:
-    from ..log import get_logger
     from .base import MusicSource
     from .bilibili import BilibiliSource
     from .kugou import KugouSource
@@ -15,15 +15,12 @@ except ImportError:  # unittest discover 顶层导入本包时无父包上下文
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from log import get_logger
     from base import MusicSource
     from bilibili import BilibiliSource
     from kugou import KugouSource
     from kuwo import KuwoSource
     from netease import NeteaseSource
     from qqmusic import QQMusicSource
-
-logger = get_logger()
 
 ALL_SOURCES: dict[str, type[MusicSource]] = {
     NeteaseSource.name: NeteaseSource,

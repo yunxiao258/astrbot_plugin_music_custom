@@ -2,14 +2,12 @@
 
 import asyncio
 
+from astrbot.api import logger
+
 try:
-    from ..log import get_logger
     from .base import MusicItem, MusicSource
 except ImportError:  # unittest discover 顶层导入场景
-    from log import get_logger
     from base import MusicItem, MusicSource
-
-logger = get_logger()
 
 SEARCH_URL = "https://songsearch.kugou.com/song_search_v2"
 PLAY_URL = "https://wwwapi.kugou.com/yy/index.php"

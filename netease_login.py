@@ -6,10 +6,6 @@ import time
 
 import qrcode
 
-from .log import get_logger
-
-logger = get_logger()
-
 # 扫码登录
 QR_UNIKEY_URL = "https://music.163.com/api/login/qrcode/unikey"
 QR_CHECK_URL = "https://music.163.com/api/login/qrcode/client/login"

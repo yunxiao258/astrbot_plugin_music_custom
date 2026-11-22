@@ -4,7 +4,6 @@ import asyncio
 import os
 import shutil
 import subprocess
-import tempfile
 import time
 
 FFMPEG = None

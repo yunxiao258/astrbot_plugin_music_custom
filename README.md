@@ -103,10 +103,8 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 
 ## 专属日志
 
-插件运行日志写入独立文件（不混入 AstrBot 主日志），同时转发一份到 AstrBot 主日志/WebUI：
+插件运行日志统一通过官方 `from astrbot.api import logger` 输出到 AstrBot 主日志与 WebUI 控制台：
 
-- 位置：`plugin_data/astrbot_plugin_music_custom/logs/music.log`
-- 大小：单文件 2MB 自动滚动，保留最近 3 份备份
 - 内容：点歌/搜索/播放/发送等关键流程，以及每个源（网易云/QQ/酷狗/酷我/B站）的搜索返回、风控记录、播放地址获取结果
 - 排查技巧：看到 `源 xxx 搜索「...」无结果` 或 `HTTP 4xx/code=-460`，即为该源出口被风控；可在配置 `proxy` 走代理解决
 
@@ -122,6 +120,9 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 - `push_state.json`：定时推送状态
 
 ## 更新记录
+
+### v1.8.1
+- 规范化日志实现以符合 AstrBot 插件市场安全审查规范：移除自建 `log.py`（不再使用内置 `logging` / `RotatingFileHandler`），`main.py`、`netease_login.py` 与全部 `sources/*.py` 统一改用 `from astrbot.api import logger`
 
 ### v1.8.0
 - 接入插件生态中枢标准联动协议：支持自动接收大吉运势赠送的额外每日点歌配额，点歌播放与状态同步至管理面板
