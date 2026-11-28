@@ -1,4 +1,4 @@
-"""点歌统计持久化（plugin_data/astrbot_plugin_music_custom/stats.json）
+"""点歌统计持久化（data/plugin_data/astrbot_plugin_music_custom/stats.json）
 支持总榜 / 周榜 / 月榜 / 个人榜 / 用户榜，按日聚合时间维度。
 """
 
@@ -13,15 +13,25 @@ class MusicStats:
     """歌曲/用户点歌统计，带线程锁的 JSON 持久化"""
 
     def __init__(self, data_dir: str) -> None:
-        self.path = os.path.join(data_dir, "astrbot_plugin_music_custom", "stats.json")
+        norm = os.path.normpath(data_dir)
+        if os.path.basename(norm) == "astrbot_plugin_music_custom":
+            self.path = os.path.join(norm, "stats.json")
+            # 仅只读兼容早期双层嵌套目录，所有写入均落盘至 data/plugin_data/astrbot_plugin_music_custom/stats.json
+            self._legacy_nested_path = os.path.join(norm, "astrbot_plugin_music_custom", "stats.json")
+        else:
+            self.path = os.path.join(data_dir, "astrbot_plugin_music_custom", "stats.json")
+            self._legacy_nested_path = ""
         self._lock = threading.Lock()
         self.data: dict = {"songs": {}, "users": {}}
         self._load()
 
     def _load(self) -> None:
         try:
-            if os.path.exists(self.path):
-                with open(self.path, "r", encoding="utf-8") as f:
+            src = self.path
+            if not os.path.exists(src) and self._legacy_nested_path and os.path.exists(self._legacy_nested_path):
+                src = self._legacy_nested_path
+            if os.path.exists(src):
+                with open(src, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
         except Exception:
             self.data = {"songs": {}, "users": {}}

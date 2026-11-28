@@ -384,6 +384,19 @@ class TestNewFeatures(unittest.TestCase):
             result2 = asyncio.run(p._do_stats(FakeEvent("u1"), "歌 不存在"))
             self.assertIn("没有", self._text(result2))
 
+    def test_default_cache_dir_and_stats_path_under_data_dir(self):
+        from astrbot_plugin_music_custom.stats import MusicStats
+
+        with tempfile.TemporaryDirectory() as td:
+            plugin_data = os.path.join(td, "plugin_data", "astrbot_plugin_music_custom")
+            os.makedirs(plugin_data, exist_ok=True)
+            p = make_plugin()
+            p.data_dir = plugin_data
+            p.config.pop("cache_dir", None)
+            self.assertEqual(p._cache_dir(), os.path.join(plugin_data, "cache"))
+            stats = MusicStats(plugin_data)
+            self.assertEqual(stats.path, os.path.join(plugin_data, "stats.json"))
+
     # ---------- 周报 ----------
 
     def _seed_stats(self, p):

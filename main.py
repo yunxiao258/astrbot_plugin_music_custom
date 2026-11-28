@@ -95,7 +95,7 @@ try:
 except ImportError:
     from hub_bridge import HUB_PROTOCOL_VERSION, emit_hub_event
 
-PLUGIN_VERSION = "1.9.0"
+PLUGIN_VERSION = "1.9.1"
 PLUGIN_AUTHOR = "云晓"
 
 
@@ -119,6 +119,7 @@ class MusicPlugin(Star):
                     "plugin_data",
                     "astrbot_plugin_music_custom",
                 )
+            # 仅只读迁移历史旧版数据至 StarTools.get_data_dir()（data/plugin_data/<plugin_name>），所有写入均严格位于标准数据目录
             _legacy_dir = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 "plugin_data",
@@ -415,11 +416,11 @@ class MusicPlugin(Star):
             return None
 
     def _cache_dir(self) -> str:
-        """语音缓存目录：可用配置 cache_dir 覆盖，默认插件目录下 cache"""
+        """语音缓存目录：可用配置 cache_dir 覆盖，默认落在 data/plugin_data/astrbot_plugin_music_custom/cache"""
         cfg_dir = str(self.config.get("cache_dir", "") or "").strip()
         if cfg_dir:
             return os.path.abspath(cfg_dir)
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+        return os.path.join(self.data_dir, "cache")
 
     def _cleanup_cache(self):
         """清理缓存目录，超过 cache_max_mb 时删除最旧文件"""

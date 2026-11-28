@@ -110,7 +110,7 @@ AstrBot 群聊点歌插件：多音乐源聚合搜索，语音/卡片发送，�
 
 ## 数据
 
-存储于 `plugin_data/astrbot_plugin_music_custom/`：
+通过 `StarTools.get_data_dir()` 存储于 `data/plugin_data/astrbot_plugin_music_custom/`（语音转码缓存默认位于同目录 `cache/` 子目录）：
 
 - `stats.json`：点歌统计
 - `favorites.json`：用户收藏

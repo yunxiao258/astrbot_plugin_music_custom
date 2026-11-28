@@ -45,7 +45,7 @@ def _find_ffmpeg() -> str | None:
 
 async def convert_to_amr(src: str, out_path: str) -> bool:
     """用 ffmpeg 将音频转换为 QQ 可播放的 AMR-NB 12.2kbps"""
-    ff = _find_ffmpeg()
+    ff = await asyncio.to_thread(_find_ffmpeg)
     if not ff:
         return False
 
