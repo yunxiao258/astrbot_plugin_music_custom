@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """music_custom 新功能测试（v1.7.0）：热评伴唱、个性化推荐。"""
 
 import asyncio
@@ -13,19 +12,30 @@ sys.path.insert(0, os.path.dirname(_PLUGIN_DIR))
 sys.path.insert(0, _PLUGIN_DIR)
 
 from astrbot_plugin_music_custom.main import PLUGIN_VERSION, MusicPlugin  # noqa: E402
+
 from sources.base import MusicItem  # noqa: E402
 
 
 def make_item(source="netease", title="晴天", artist="周杰伦", id="186016"):
     return MusicItem(
-        source=source, id=id, title=title, artist=artist,
-        url="", artwork="",
+        source=source,
+        id=id,
+        title=title,
+        artist=artist,
+        url="",
+        artwork="",
     )
 
 
 class FakeEvent:
-    def __init__(self, message_str="/点歌", sender_id="u1", sender_name="小明",
-                 group_id="123", is_admin=False):
+    def __init__(
+        self,
+        message_str="/点歌",
+        sender_id="u1",
+        sender_name="小明",
+        group_id="123",
+        is_admin=False,
+    ):
         self.message_str = message_str
         self._sid = sender_id
         self._name = sender_name
@@ -75,6 +85,7 @@ def chain_text(chain) -> str:
 def make_plugin():
     """真实构造插件（data_dir 指向临时目录），再 mock 掉网络相关组件"""
     import tempfile
+
     tmp = tempfile.mkdtemp(prefix="music_extra_")
     with mock.patch.object(MusicPlugin, "__init__", return_value=None):
         p = MusicPlugin(None, {})
@@ -105,9 +116,7 @@ class TestHotComment(unittest.TestCase):
         netease_src = mock.MagicMock()
         netease_src.get_hot_comment = mock.AsyncMock(return_value=comment)
         p.sources.get.return_value = netease_src
-        p.sources.search_all = mock.AsyncMock(
-            return_value=[("netease", [make_item()])]
-        )
+        p.sources.search_all = mock.AsyncMock(return_value=[("netease", [make_item()])])
         p._play_item = mock.AsyncMock(return_value=None)
         return netease_src
 
@@ -118,7 +127,7 @@ class TestHotComment(unittest.TestCase):
         run(p.order_music(ev, "热评 晴天"))
         # 播放的是网易云版本，且带 tail_segs 热评段
         args, kwargs = p._play_item.call_args
-        item, kw = args[1], args[2]
+        item, kw = args[1], args[2]  # noqa: F841
         self.assertEqual(item.source, "netease")
         self.assertEqual(item.title, "晴天")
         tail = kwargs.get("tail_segs") or []
@@ -161,13 +170,11 @@ class TestRecommend(unittest.TestCase):
         # 搜索返回同歌手的几首新歌 + 一首已听过的
         items = [
             make_item(title="七里香", artist="周杰伦"),
-            make_item(title="晴天", artist="周杰伦"),       # 已点过
+            make_item(title="晴天", artist="周杰伦"),  # 已点过
             make_item(title="稻香", artist="周杰伦"),
             make_item(source="kuwo", title="夜曲", artist="周杰伦"),
         ]
-        p.sources.search_all = mock.AsyncMock(
-            return_value=[("netease", items)]
-        )
+        p.sources.search_all = mock.AsyncMock(return_value=[("netease", items)])
         return p
 
     def test_recommend_filters_played(self):
@@ -210,7 +217,15 @@ class TestRecommend(unittest.TestCase):
 class TestV171LifecycleAndStatus(unittest.TestCase):
     def test_sync_init_without_loop_does_not_crash(self):
         tmp = tempfile.mkdtemp(prefix="music_init_")
-        p = MusicPlugin(context=None, config={"weekly_report_enable": True, "hot_push_enable": True, "voice_mode": "off"}, data_dir=tmp)
+        p = MusicPlugin(
+            context=None,
+            config={
+                "weekly_report_enable": True,
+                "hot_push_enable": True,
+                "voice_mode": "off",
+            },
+            data_dir=tmp,
+        )
         self.assertIsNone(p._report_task)
         self.assertIsNone(p._push_task)
 

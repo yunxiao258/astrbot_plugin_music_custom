@@ -80,7 +80,10 @@ class Favorites(JsonStore):
         """收藏；返回 (是否成功, 说明)"""
         with self._lock:
             lst = self.data.setdefault(user_id, [])
-            if any(d.get("source") == item.source and str(d.get("id")) == str(item.id) for d in lst):
+            if any(
+                d.get("source") == item.source and str(d.get("id")) == str(item.id)
+                for d in lst
+            ):
                 return False, "这首歌已经在你的收藏里啦～"
             if len(lst) >= FAV_LIMIT:
                 return False, f"收藏已满（最多 {FAV_LIMIT} 首），请先删除一些～"

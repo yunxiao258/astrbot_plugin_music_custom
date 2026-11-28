@@ -3,7 +3,14 @@ display_name: 自研点歌插件
 short_desc: 多平台聚合点歌、语音/卡片发送、队列收藏与个性化推荐
 desc: 群聊点歌：多源聚合搜索（网易云/酷我/酷狗/QQ音乐/bilibili），语音/卡片发送，选歌交互，随机/热门/统计/热评伴唱/个性化推荐
 help: 发送「/点歌 歌名」搜索歌曲并回复序号选择；「/点歌 随机」随机点歌；「/点歌 热门」查看榜单；「/点歌 热评 歌名」播放并附网易云热评；「/点歌 推荐」根据口味个性化推荐；「/点歌 统计」查看热门点歌榜；「/song status」查看音源与缓存状态
-version: 1.9.1
+version: 1.9.2
 author: 云晓
 repo: https://github.com/yunxiao258/astrbot_plugin_music_custom
 astrbot_version: ">=4.0.0"
+social_link: https://github.com/yunxiao258
+tags:
+  - music
+  - entertainment
+  - audio
+  - 点歌
+  - 音乐

@@ -1,6 +1,6 @@
 """音乐源注册表与轮询调度"""
 
-import requests
+import httpx
 from astrbot.api import logger
 
 try:
@@ -13,6 +13,7 @@ try:
 except ImportError:  # unittest discover 顶层导入本包时无父包上下文
     import os
     import sys
+
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from base import MusicSource
@@ -44,28 +45,46 @@ class SourceManager:
 
     def __init__(self, config: dict) -> None:
         self.config = config
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": UA,
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            }
-        )
+        self._proxy: str | None = None
+        self.session: httpx.Client = self._build_client(proxy=None)
         self._apply_proxy()
         self._sources: dict[str, MusicSource] = {}
         self._order: list[str] = []
         self.reload()
 
+    def _build_client(self, proxy: str | None) -> httpx.Client:
+        return httpx.Client(
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+            follow_redirects=True,
+            proxy=proxy or None,
+        )
+
     def _apply_proxy(self) -> None:
         """应用配置中的 HTTP 代理（用于绕过音乐平台对服务器 IP 的风控）"""
-        proxy = str(self.config.get("proxy", "") or "").strip()
+        proxy = str(self.config.get("proxy", "") or "").strip() or None
+        if proxy != self._proxy:
+            old = self.session
+            self.session = self._build_client(proxy=proxy)
+            self._proxy = proxy
+            try:
+                old.close()
+            except Exception:
+                pass
         if proxy:
-            self.session.proxies = {"http": proxy, "https": proxy}
             logger.info(f"音乐插件已启用代理: {proxy}")
         else:
-            self.session.proxies = {}
             logger.debug("音乐插件未配置代理")
+
+    def close(self) -> None:
+        """关闭共享 httpx.Client"""
+        try:
+            self.session.close()
+        except Exception:
+            pass
 
     def reload(self) -> None:
         """按配置重建源实例（支持热重载）"""
@@ -75,7 +94,9 @@ class SourceManager:
             order = list(DEFAULT_ORDER)
         self._order = order
         self._apply_proxy()
-        self._sources = {name: ALL_SOURCES[name](self.session, config=self.config) for name in order}
+        self._sources = {
+            name: ALL_SOURCES[name](self.session, config=self.config) for name in order
+        }
         logger.debug(f"音乐源已加载: {self._order}")
 
     @property
@@ -96,9 +117,13 @@ class SourceManager:
                 items = await src.search(keyword, limit=limit)
                 if items:
                     results.append((name, items))
-                    logger.debug(f"[music] 源 {name} 搜索「{keyword}」成功，返回 {len(items)} 条")
+                    logger.debug(
+                        f"[music] 源 {name} 搜索「{keyword}」成功，返回 {len(items)} 条"
+                    )
                 else:
-                    logger.warning(f"[music] 源 {name} 搜索「{keyword}」无结果（可能被风控）")
+                    logger.warning(
+                        f"[music] 源 {name} 搜索「{keyword}」无结果（可能被风控）"
+                    )
             except Exception as e:
                 logger.warning(f"[music] 源 {name} 搜索「{keyword}」异常: {e}")
                 continue

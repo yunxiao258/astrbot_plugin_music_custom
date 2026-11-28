@@ -17,9 +17,13 @@ class MusicStats:
         if os.path.basename(norm) == "astrbot_plugin_music_custom":
             self.path = os.path.join(norm, "stats.json")
             # 仅只读兼容早期双层嵌套目录，所有写入均落盘至 data/plugin_data/astrbot_plugin_music_custom/stats.json
-            self._legacy_nested_path = os.path.join(norm, "astrbot_plugin_music_custom", "stats.json")
+            self._legacy_nested_path = os.path.join(
+                norm, "astrbot_plugin_music_custom", "stats.json"
+            )
         else:
-            self.path = os.path.join(data_dir, "astrbot_plugin_music_custom", "stats.json")
+            self.path = os.path.join(
+                data_dir, "astrbot_plugin_music_custom", "stats.json"
+            )
             self._legacy_nested_path = ""
         self._lock = threading.Lock()
         self.data: dict = {"songs": {}, "users": {}}
@@ -28,7 +32,11 @@ class MusicStats:
     def _load(self) -> None:
         try:
             src = self.path
-            if not os.path.exists(src) and self._legacy_nested_path and os.path.exists(self._legacy_nested_path):
+            if (
+                not os.path.exists(src)
+                and self._legacy_nested_path
+                and os.path.exists(self._legacy_nested_path)
+            ):
                 src = self._legacy_nested_path
             if os.path.exists(src):
                 with open(src, "r", encoding="utf-8") as f:
@@ -57,26 +65,40 @@ class MusicStats:
     def _since_date(days: int) -> str:
         return (date.today() - timedelta(days=days)).isoformat()
 
-    def record(self, item, user_id: str, user_name: str = "", group_id: str = "") -> None:
+    def record(
+        self, item, user_id: str, user_name: str = "", group_id: str = ""
+    ) -> None:
         with self._lock:
             today = self._today()
             songs = self.data["songs"]
             key = item.key
             entry = songs.get(key) or {
-                "title": item.title, "artist": item.artist, "source": item.source,
-                "count": 0, "last_at": 0, "daily": {}, "groups": {}, "users": {},
+                "title": item.title,
+                "artist": item.artist,
+                "source": item.source,
+                "count": 0,
+                "last_at": 0,
+                "daily": {},
+                "groups": {},
+                "users": {},
             }
             entry["count"] += 1
             entry["last_at"] = int(time.time())
             daily = entry.setdefault("daily", {})
             daily[today] = daily.get(today, 0) + 1
             if group_id:
-                entry.setdefault("groups", {})[group_id] = entry.get("groups", {}).get(group_id, 0) + 1
-            entry.setdefault("users", {})[user_id] = entry.get("users", {}).get(user_id, 0) + 1
+                entry.setdefault("groups", {})[group_id] = (
+                    entry.get("groups", {}).get(group_id, 0) + 1
+                )
+            entry.setdefault("users", {})[user_id] = (
+                entry.get("users", {}).get(user_id, 0) + 1
+            )
             songs[key] = entry
 
             u = self.data["users"].get(user_id) or {
-                "name": user_name, "count": 0, "daily": {},
+                "name": user_name,
+                "count": 0,
+                "daily": {},
             }
             u["name"] = user_name or u.get("name", "")
             u["count"] += 1
@@ -113,7 +135,9 @@ class MusicStats:
                     break
             return out
 
-    def top_songs_by_user(self, user_id: str, limit: int = 10, days: int = 0) -> list[dict]:
+    def top_songs_by_user(
+        self, user_id: str, limit: int = 10, days: int = 0
+    ) -> list[dict]:
         since = "" if not days else self._since_date(days)
         with self._lock:
             rows = []
@@ -121,7 +145,11 @@ class MusicStats:
                 cnt = e.get("users", {}).get(user_id, 0)
                 if days:
                     # 个人维度的天级明细未记录，用歌曲总 daily 中该用户的占比近似
-                    total_daily = sum(e.get("daily", {}).get(d, 0) for d in e.get("daily", {}) if d >= since)
+                    total_daily = sum(
+                        e.get("daily", {}).get(d, 0)
+                        for d in e.get("daily", {})
+                        if d >= since
+                    )
                     if total_daily and cnt:
                         cnt = max(1, round(cnt * total_daily / e.get("count", 1)))
                 if cnt > 0:
@@ -129,7 +157,9 @@ class MusicStats:
             rows.sort(key=lambda x: x["score"], reverse=True)
             return rows[:limit]
 
-    def top_songs_by_group(self, group_id: str, limit: int = 10, days: int = 0) -> list[dict]:
+    def top_songs_by_group(
+        self, group_id: str, limit: int = 10, days: int = 0
+    ) -> list[dict]:
         """群内排行：基于 songs 条目中的 groups 字段（精确群维度）"""
         since = "" if not days else self._since_date(days)
         with self._lock:
@@ -150,7 +180,9 @@ class MusicStats:
             return 0
         if since:
             total_daily = sum(
-                entry.get("daily", {}).get(d, 0) for d in entry.get("daily", {}) if d >= since
+                entry.get("daily", {}).get(d, 0)
+                for d in entry.get("daily", {})
+                if d >= since
             )
             if not total_daily:
                 return 0
@@ -161,7 +193,10 @@ class MusicStats:
         """群维度窗口内点播总次数"""
         since = "" if not days else self._since_date(days)
         with self._lock:
-            return sum(self._group_count(e, group_id, since) for e in self.data["songs"].values())
+            return sum(
+                self._group_count(e, group_id, since)
+                for e in self.data["songs"].values()
+            )
 
     def active_groups(self) -> list[str]:
         """返回所有出现过点歌记录的群 id（用于周报自动选择目标群）"""
@@ -177,10 +212,16 @@ class MusicStats:
             ranked = []
             for uid, e in self.data["users"].items():
                 daily = e.get("daily")
-                score = sum(n for d, n in daily.items() if d >= since) if (since and daily) else int(e.get("count", 0))
+                score = (
+                    sum(n for d, n in daily.items() if d >= since)
+                    if (since and daily)
+                    else int(e.get("count", 0))
+                )
                 if score <= 0:
                     continue
-                ranked.append({"user_id": uid, "name": e.get("name", ""), "score": score})
+                ranked.append(
+                    {"user_id": uid, "name": e.get("name", ""), "score": score}
+                )
             ranked.sort(key=lambda x: x["score"], reverse=True)
             return ranked[:limit]
 
@@ -192,7 +233,10 @@ class MusicStats:
                 return []
             hits = []
             for e in self.data["songs"].values():
-                if kw in str(e.get("title", "")).lower() or kw in str(e.get("artist", "")).lower():
+                if (
+                    kw in str(e.get("title", "")).lower()
+                    or kw in str(e.get("artist", "")).lower()
+                ):
                     hits.append(e)
                 if len(hits) >= limit:
                     break

@@ -52,10 +52,27 @@ async def convert_to_amr(src: str, out_path: str) -> bool:
     def _do():
         try:
             r = subprocess.run(
-                [ff, "-y", "-i", src, "-ar", "8000", "-ac", "1", "-b:a", "12.2k", out_path],
-                capture_output=True, timeout=120,
+                [
+                    ff,
+                    "-y",
+                    "-i",
+                    src,
+                    "-ar",
+                    "8000",
+                    "-ac",
+                    "1",
+                    "-b:a",
+                    "12.2k",
+                    out_path,
+                ],
+                capture_output=True,
+                timeout=120,
             )
-            return r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 100
+            return (
+                r.returncode == 0
+                and os.path.exists(out_path)
+                and os.path.getsize(out_path) > 100
+            )
         except Exception:
             return False
 
@@ -63,29 +80,27 @@ async def convert_to_amr(src: str, out_path: str) -> bool:
 
 
 async def download_audio(url: str, out_path: str, timeout: int = 60) -> bool:
-    """下载音频到本地文件"""
-    import requests
+    """异步下载音频到本地文件（使用 httpx.AsyncClient）"""
+    import httpx
 
-    def _do():
-        try:
-            r = requests.get(url, stream=True, timeout=timeout, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://www.bilibili.com/",
-            })
-            if r.status_code != 200:
-                return False
-            total = 0
-            with open(out_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=65536):
-                    if not chunk:
-                        continue
-                    f.write(chunk)
-                    total += len(chunk)
-                    if total > 50 * 1024 * 1024:
-                        r.close()
-                        return False
-            return total > 1000
-        except Exception:
-            return False
-
-    return await asyncio.to_thread(_do)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.bilibili.com/",
+    }
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            async with client.stream("GET", url, headers=headers) as r:
+                if r.status_code != 200:
+                    return False
+                total = 0
+                with open(out_path, "wb") as f:
+                    async for chunk in r.aiter_bytes(chunk_size=65536):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        total += len(chunk)
+                        if total > 50 * 1024 * 1024:
+                            return False
+                return total > 1000
+    except Exception:
+        return False

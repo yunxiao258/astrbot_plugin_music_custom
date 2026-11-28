@@ -7,15 +7,17 @@ from dataclasses import dataclass, field
 class MusicItem:
     """统一歌曲数据结构"""
 
-    source: str          # 来源标识：netease/kuwo/qqmusic/kugou/bilibili
-    id: str              # 源内歌曲唯一 ID
-    title: str           # 歌名
-    artist: str          # 歌手
-    album: str = ""      # 专辑
-    duration: int = 0    # 时长（秒）
-    artwork: str = ""    # 封面图 URL
-    url: str = ""        # 音频直链（可能为空，需 get_media_url 获取）
-    extra: dict = field(default_factory=dict)  # 源特有数据（如 bilibili 的 bvid/cid、qq 的 songmid）
+    source: str  # 来源标识：netease/kuwo/qqmusic/kugou/bilibili
+    id: str  # 源内歌曲唯一 ID
+    title: str  # 歌名
+    artist: str  # 歌手
+    album: str = ""  # 专辑
+    duration: int = 0  # 时长（秒）
+    artwork: str = ""  # 封面图 URL
+    url: str = ""  # 音频直链（可能为空，需 get_media_url 获取）
+    extra: dict = field(
+        default_factory=dict
+    )  # 源特有数据（如 bilibili 的 bvid/cid、qq 的 songmid）
 
     @property
     def key(self) -> str:
@@ -25,7 +27,9 @@ class MusicItem:
     @property
     def display(self) -> str:
         """列表展示文本"""
-        dur = f"[{self.duration // 60}:{self.duration % 60:02d}]" if self.duration else ""
+        dur = (
+            f"[{self.duration // 60}:{self.duration % 60:02d}]" if self.duration else ""
+        )
         return f"{self.title} - {self.artist} {dur}".strip()
 
 
@@ -36,7 +40,7 @@ class MusicSource:
     display_name = "未知源"
 
     def __init__(self, session, config: dict | None = None) -> None:
-        """session 为共享 requests.Session；config 为插件全局配置"""
+        """session 为共享 httpx.Client；config 为插件全局配置"""
         self.session = session
         self.config = config or {}
 

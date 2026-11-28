@@ -11,10 +11,10 @@ from datetime import datetime
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import MessageChain, MessageEventResult
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image, Music, Plain, Record
 from astrbot.api.platform import MessageType
-from astrbot.api.star import Context, Star, StarTools, register
+from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.star.filter.command import GreedyStr
 
 from .netease_login import (
@@ -26,7 +26,14 @@ from .netease_login import (
 )
 from .sources import SourceManager
 from .stats import MusicStats
-from .store import BlockedStore, Favorites, GroupConfigs, PlatformLearner, PushState, QuotaStore
+from .store import (
+    BlockedStore,
+    Favorites,
+    GroupConfigs,
+    PlatformLearner,
+    PushState,
+    QuotaStore,
+)
 from .voice import convert_to_amr, download_audio
 
 # 点歌标准指令名。
@@ -38,14 +45,14 @@ DEFAULT_ORDER_ALIASES = set()
 # 序号选择
 SELECT_PATTERN = re.compile(r"^\s*(\d{1,2})\s*$")
 # URL 链接
-URL_PATTERN = re.compile(r"https?://[^\s，。！？!?]+", re.I)
+URL_PATTERN = re.compile(r"https?://[^\s，。！？!?]+", re.IGNORECASE)
 # 取消选歌
 CANCEL_PATTERN = re.compile(r"^(取消|退出|算了|不听了|不要了|不想听)$")
 
 # 高音质前缀（后接关键词）
-HIGH_QUALITY_RE = re.compile(r"^(高清|高音质|无损|音质)[\s:：]+(.+)$", re.S)
+HIGH_QUALITY_RE = re.compile(r"^(高清|高音质|无损|音质)[\s:：]+(.+)$", re.DOTALL)
 # 歌词搜索前缀（后接歌词片段）
-LYRIC_SEARCH_RE = re.compile(r"^歌词[\s:：]+(.+)$", re.S)
+LYRIC_SEARCH_RE = re.compile(r"^歌词[\s:：]+(.+)$", re.DOTALL)
 # 翻页指令
 PAGE_PATTERN = re.compile(r"^(下一页|下页|更多|上一页|上页|上一批|下一批)$")
 
@@ -76,7 +83,18 @@ ADMIN_KEYS = {
     "netease_cookie": "网易云登录 Cookie（浏览器登录 music.163.com 后复制，含 MUSIC_U；可解锁 VIP 歌曲直链）",
 }
 
-RANDOM_KEYWORDS = ["热门", "经典", "2024", "抖音", "古风", "翻唱", "纯音乐", "BGM", "粤语", "民谣"]
+RANDOM_KEYWORDS = [
+    "热门",
+    "经典",
+    "2024",
+    "抖音",
+    "古风",
+    "翻唱",
+    "纯音乐",
+    "BGM",
+    "粤语",
+    "民谣",
+]
 
 # 语音发送结果标记：URL 直发成功
 _URL_SENT = object()
@@ -95,16 +113,20 @@ try:
 except ImportError:
     from hub_bridge import HUB_PROTOCOL_VERSION, emit_hub_event
 
-PLUGIN_VERSION = "1.9.1"
+PLUGIN_VERSION = "1.9.2"
 PLUGIN_AUTHOR = "云晓"
 
 
-@register("astrbot_plugin_music_custom", PLUGIN_AUTHOR, "群聊点歌：多源聚合搜索，语音/卡片发送，收藏/队列/统计/热评伴唱/个性化推荐", PLUGIN_VERSION)
 class MusicPlugin(Star):
     HUB_PROTOCOL_VERSION = HUB_PROTOCOL_VERSION
     """点歌指令「/点歌 歌名」，支持随机/热门/统计/收藏/排队，选中后发语音或QQ音乐卡片"""
 
-    def __init__(self, context: Context, config: AstrBotConfig = None, data_dir: str | None = None):
+    def __init__(
+        self,
+        context: Context,
+        config: AstrBotConfig = None,
+        data_dir: str | None = None,
+    ):
         super().__init__(context)
         self.config = config or {}
         # 数据目录：优先使用 AstrBot 官方 StarTools.get_data_dir()（仅读写插件自身文件，绝不触碰全局配置）
@@ -112,10 +134,14 @@ class MusicPlugin(Star):
             self.data_dir = os.path.abspath(data_dir)
         else:
             try:
-                self.data_dir = os.path.abspath(str(StarTools.get_data_dir("astrbot_plugin_music_custom")))
+                self.data_dir = os.path.abspath(
+                    str(StarTools.get_data_dir("astrbot_plugin_music_custom"))
+                )
             except Exception:
                 self.data_dir = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                    os.path.dirname(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    ),
                     "plugin_data",
                     "astrbot_plugin_music_custom",
                 )
@@ -125,26 +151,37 @@ class MusicPlugin(Star):
                 "plugin_data",
                 "astrbot_plugin_music_custom",
             )
-            if os.path.isdir(_legacy_dir) and os.path.abspath(_legacy_dir) != self.data_dir:
+            if (
+                os.path.isdir(_legacy_dir)
+                and os.path.abspath(_legacy_dir) != self.data_dir
+            ):
                 import shutil
+
                 os.makedirs(self.data_dir, exist_ok=True)
                 try:
                     for _fn in os.listdir(_legacy_dir):
-                        _sp, _dp = os.path.join(_legacy_dir, _fn), os.path.join(self.data_dir, _fn)
+                        _sp, _dp = (
+                            os.path.join(_legacy_dir, _fn),
+                            os.path.join(self.data_dir, _fn),
+                        )
                         if os.path.isfile(_sp) and not os.path.exists(_dp):
                             shutil.copy2(_sp, _dp)
                 except Exception:
                     pass
         os.makedirs(self.data_dir, exist_ok=True)
         self.sources = SourceManager(self.config)
-        self.stats = MusicStats(self.data_dir) if self.config.get("enable_stats", True) else None
+        self.stats = (
+            MusicStats(self.data_dir) if self.config.get("enable_stats", True) else None
+        )
         self.favs = Favorites(self.data_dir)
         self.groups = GroupConfigs(self.data_dir)
         self.quota = QuotaStore(self.data_dir)
         self.blocked = BlockedStore(self.data_dir)
         self.push_state = PushState(self.data_dir)
         self._learned = PlatformLearner(self.data_dir)
-        self._pending: dict[str, dict] = {}   # group_id -> {user_id: {mode, items, page, ts, kw, quality}}
+        self._pending: dict[
+            str, dict
+        ] = {}  # group_id -> {user_id: {mode, items, page, ts, kw, quality}}
         self._last_order: dict[str, float] = {}  # user_id -> 上次点歌时间戳
         # 播放队列：group_id -> [队列项]
         self._queues: dict[str, list] = {}
@@ -192,7 +229,9 @@ class MusicPlugin(Star):
                 pend = self._pending.get(gid)
                 if not pend:
                     continue
-                expired = [uid for uid, s in pend.items() if now - s.get("ts", 0) > timeout]
+                expired = [
+                    uid for uid, s in pend.items() if now - s.get("ts", 0) > timeout
+                ]
                 for uid in expired:
                     pend.pop(uid, None)
                 if not pend:
@@ -251,7 +290,9 @@ class MusicPlugin(Star):
         except Exception:
             pass
         admins = str(self._cfg("admins", "")).replace("，", ",")
-        return str(event.get_sender_id()) in [a.strip() for a in admins.split(",") if a.strip()]
+        return str(event.get_sender_id()) in [
+            a.strip() for a in admins.split(",") if a.strip()
+        ]
 
     def _check_frequency(self, user_id: str, group_id: str = "") -> bool:
         """频率限制：返回 True 表示允许"""
@@ -323,10 +364,17 @@ class MusicPlugin(Star):
         total = max(1, math.ceil(len(sess["items"]) / per))
         page = max(1, min(page, total))
         items = sess["items"]
-        return items[(page - 1) * per: page * per], page, total
+        return items[(page - 1) * per : page * per], page, total
 
-    def _fmt_list(self, items, page: int = 1, total_pages: int = 1, head: str = "") -> str:
-        lines = [head or "为你找到这些歌曲，回复序号选择（{} 秒内）:".format(self._safe_int("select_timeout", 30))]
+    def _fmt_list(
+        self, items, page: int = 1, total_pages: int = 1, head: str = ""
+    ) -> str:
+        lines = [
+            head
+            or "为你找到这些歌曲，回复序号选择（{} 秒内）:".format(
+                self._safe_int("select_timeout", 30)
+            )
+        ]
         for i, it in enumerate(items, 1):
             src = self.sources.get(it.source)
             tag = src.display_name if src else it.source
@@ -377,7 +425,11 @@ class MusicPlugin(Star):
             Record:   amr 转码成功，可加入结果链发送
             None:     发送失败
         """
-        mode = str(self._cfg("voice_mode", "url", str(event.get_group_id() or ""))).strip().lower()
+        mode = (
+            str(self._cfg("voice_mode", "url", str(event.get_group_id() or "")))
+            .strip()
+            .lower()
+        )
         if mode == "off":
             return None
         group_id = str(event.get_group_id() or "")
@@ -456,14 +508,23 @@ class MusicPlugin(Star):
         """QQ 音乐卡片（仅 qqmusic 源）+ 封面 + 链接文本（组件列表）"""
         segs = []
         qqsrc = self.sources.get("qqmusic")
-        if item.source == "qqmusic" and self._cfg("enable_card", True) and qqsrc is not None:
+        if (
+            item.source == "qqmusic"
+            and self._cfg("enable_card", True)
+            and qqsrc is not None
+        ):
             try:
                 card = qqsrc.get_card(item)
                 if card is not None:
                     segs.append(Music(**card))
             except Exception as e:
                 logger.warning(f"QQ 音乐卡片构建失败，回退封面/链接: {e}")
-        if not segs and self._cfg("enable_artwork", True) and item.artwork and item.artwork.startswith("http"):
+        if (
+            not segs
+            and self._cfg("enable_artwork", True)
+            and item.artwork
+            and item.artwork.startswith("http")
+        ):
             try:
                 segs.append(Image.fromURL(item.artwork))
             except Exception:
@@ -472,12 +533,23 @@ class MusicPlugin(Star):
             segs.append(Plain(f"🎵 {item.title} - {item.artist}\n链接: {item.url}"))
         elif item.source == "netease" and item.id.isdigit():
             # 网易云 VIP/无版权歌曲拿不到直链：补网页链接兜底，点开可试听
-            segs.append(Plain(f"🎵 {item.title} - {item.artist}\n链接: https://music.163.com/song?id={item.id}"))
+            segs.append(
+                Plain(
+                    f"🎵 {item.title} - {item.artist}\n链接: https://music.163.com/song?id={item.id}"
+                )
+            )
         return segs
 
     # ---------- 播放主流程 ----------
 
-    async def _play_item(self, event, item, keyword: str = "", sess: dict | None = None, tail_segs: list | None = None) -> MessageEventResult | None:
+    async def _play_item(
+        self,
+        event,
+        item,
+        keyword: str = "",
+        sess: dict | None = None,
+        tail_segs: list | None = None,
+    ) -> MessageEventResult | None:
         """对选中的歌曲执行：语音 → 卡片/链接 → 歌词 → 统计"""
         group_id = str(event.get_group_id() or "")
         # 屏蔽词拦截（防收藏/队列绕过）
@@ -489,13 +561,17 @@ class MusicPlugin(Star):
         if keyword and keyword not in ("链接", "收藏", "热门"):
             head += f"（{keyword}）"
 
-        quality = (sess or {}).get("quality") or str(self._cfg("quality", "standard", group_id))
+        quality = (sess or {}).get("quality") or str(
+            self._cfg("quality", "standard", group_id)
+        )
         chain = None
         url = ""
         for q in _QUALITY_CHAIN.get(quality, ["standard"]):
             url = await self.sources.first_media_url(item, quality=q)
             if url:
-                logger.info(f"[music] 播放地址获取成功（{q}）: {item.title} - {item.artist}")
+                logger.info(
+                    f"[music] 播放地址获取成功（{q}）: {item.title} - {item.artist}"
+                )
                 break
         if not url:
             logger.warning(
@@ -567,8 +643,23 @@ class MusicPlugin(Star):
     def _record(self, event, item, group_id: str = ""):
         if self.stats is not None:
             try:
-                self.stats.record(item, str(event.get_sender_id()), event.get_sender_name() or "", group_id)
-                emit_hub_event("astrbot_plugin_music_custom", "music.played", {"user_id": str(event.get_sender_id() or ""), "nickname": str(event.get_sender_name() or ""), "group_id": group_id, "title": getattr(item, "name", str(item))}, self.context)
+                self.stats.record(
+                    item,
+                    str(event.get_sender_id()),
+                    event.get_sender_name() or "",
+                    group_id,
+                )
+                emit_hub_event(
+                    "astrbot_plugin_music_custom",
+                    "music.played",
+                    {
+                        "user_id": str(event.get_sender_id() or ""),
+                        "nickname": str(event.get_sender_name() or ""),
+                        "group_id": group_id,
+                        "title": getattr(item, "name", str(item)),
+                    },
+                    self.context,
+                )
             except Exception as e:
                 logger.warning(f"记录点歌统计失败: {e}")
 
@@ -579,7 +670,9 @@ class MusicPlugin(Star):
 
     # ---------- 各功能分支 ----------
 
-    async def _do_search(self, event, keyword: str, mode: str = "search", quality: str = "") -> MessageEventResult | None:
+    async def _do_search(
+        self, event, keyword: str, mode: str = "search", quality: str = ""
+    ) -> MessageEventResult | None:
         """搜索并进入选歌状态；mode: search/fav/queue/lyric；含去重排序、屏蔽过滤、宽松重搜、翻页"""
         user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id() or "private")
@@ -600,12 +693,22 @@ class MusicPlugin(Star):
                 results = await self.sources.search_all(self._norm(kw), limit=limit)
         if mode == "lyric":
             lyric_items = await self.sources.search_by_lyric(kw, limit=limit * 2)
-            items = [it for it in lyric_items if not self.blocked.is_blocked(it)][:limit]
+            items = [it for it in lyric_items if not self.blocked.is_blocked(it)][
+                :limit
+            ]
             if not items:
                 return self._send_text(event, "😢 没找到包含这段歌词的歌，换个词试试？")
-            head = f"🎶 按歌词找到这些歌{(f'（{hint}）') if hint else ''}，回复序号播放："
+            head = (
+                f"🎶 按歌词找到这些歌{(f'（{hint}）') if hint else ''}，回复序号播放："
+            )
             self._pending.setdefault(group_id, {})[user_id] = {
-                "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality, "group_id": group_id,
+                "mode": "search",
+                "items": items,
+                "page": 1,
+                "ts": time.time(),
+                "kw": kw,
+                "quality": quality,
+                "group_id": group_id,
             }
             return self._send_text(event, self._fmt_list(items, 1, 1, head))
         items = self._merge_results(results, kw)
@@ -631,7 +734,13 @@ class MusicPlugin(Star):
         if blocked_n:
             head += f"（已过滤 {blocked_n} 条屏蔽结果）"
         self._pending.setdefault(group_id, {})[user_id] = {
-            "mode": mode, "items": items, "page": 1, "ts": time.time(), "kw": kw, "quality": quality, "group_id": group_id,
+            "mode": mode,
+            "items": items,
+            "page": 1,
+            "ts": time.time(),
+            "kw": kw,
+            "quality": quality,
+            "group_id": group_id,
         }
         page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
         return self._send_text(event, self._fmt_list(page_items, page, total, head))
@@ -671,7 +780,9 @@ class MusicPlugin(Star):
             if not src:
                 continue
             try:
-                items = await src.get_hot(limit=self._safe_int("search_limit", 5, group_id))
+                items = await src.get_hot(
+                    limit=self._safe_int("search_limit", 5, group_id)
+                )
                 if items:
                     break
             except Exception:
@@ -680,7 +791,13 @@ class MusicPlugin(Star):
         if not items:
             return self._send_text(event, "😢 热门榜单获取失败，稍后再试～")
         self._pending.setdefault(group_id, {})[user_id] = {
-            "mode": "search", "items": items, "page": 1, "ts": time.time(), "kw": "热门", "quality": "", "group_id": group_id,
+            "mode": "search",
+            "items": items,
+            "page": 1,
+            "ts": time.time(),
+            "kw": "热门",
+            "quality": "",
+            "group_id": group_id,
         }
         page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
         return self._send_text(event, self._fmt_list(page_items, page, total))
@@ -716,7 +833,9 @@ class MusicPlugin(Star):
                 return self._send_text(event, "你还没有点过歌，快来点一首吧～")
             lines = ["🎶 我的最爱 Top 5:"]
             for i, s in enumerate(top, 1):
-                lines.append(f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）")
+                lines.append(
+                    f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）"
+                )
             return self._send_text(event, "\n".join(lines))
         elif extra in ("人", "达人", "用户"):
             top = self.stats.top_users(10)
@@ -724,7 +843,9 @@ class MusicPlugin(Star):
                 return self._send_text(event, "还没有人点过歌，快来点第一首吧～")
             lines = ["🏆 点歌达人 Top 10:"]
             for i, u in enumerate(top, 1):
-                lines.append(f"{i}. {u['name'] or u['user_id']}（点了 {u['score']} 次）")
+                lines.append(
+                    f"{i}. {u['name'] or u['user_id']}（点了 {u['score']} 次）"
+                )
             return self._send_text(event, "\n".join(lines))
         elif extra in ("群", "本群", "群里"):
             if not group_id:
@@ -734,7 +855,9 @@ class MusicPlugin(Star):
                 return self._send_text(event, "本群还没有人点过歌，快来点第一首吧～")
             lines = ["🏆 本群最受欢迎 Top 10:"]
             for i, s in enumerate(top, 1):
-                lines.append(f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）")
+                lines.append(
+                    f"{i}. {s['title']} - {s['artist']}（点了 {s['score']} 次）"
+                )
             return self._send_text(event, "\n".join(lines))
         elif extra.startswith(("歌 ", "歌曲 ")):
             # 单曲详情：/点歌 统计 歌 <关键词>（谁点过、多少次、最近一次）
@@ -745,11 +868,15 @@ class MusicPlugin(Star):
             lines = [f"🎶 「{kw}」相关点歌记录:"]
             for s in hits:
                 lines.append(f"📍 {s['title']} - {s['artist']}")
-                lines.append(f"   共点 {s['count']} 次，最近 {time.strftime('%m-%d %H:%M', time.localtime(s.get('last_at', 0)))}")
+                lines.append(
+                    f"   共点 {s['count']} 次，最近 {time.strftime('%m-%d %H:%M', time.localtime(s.get('last_at', 0)))}"
+                )
                 users = s.get("users", {})
                 if users:
                     who = "、".join(list(users)[:5])
-                    lines.append(f"   点过的人: {who}" + (" 等" if len(users) > 5 else ""))
+                    lines.append(
+                        f"   点过的人: {who}" + (" 等" if len(users) > 5 else "")
+                    )
             return self._send_text(event, "\n".join(lines))
         else:
             top = self.stats.top_songs(10)
@@ -808,7 +935,9 @@ class MusicPlugin(Star):
         if not ok:
             return self._send_text(event, hint)
         if self.stats is None:
-            return self._send_text(event, "统计功能未启用（enable_stats=False），无法生成推荐")
+            return self._send_text(
+                event, "统计功能未启用（enable_stats=False），无法生成推荐"
+            )
         top = self.stats.top_songs_by_user(user_id, 10)
         artists: list[str] = []
         seen: set = set()
@@ -846,8 +975,13 @@ class MusicPlugin(Star):
             f"{name}，这几首同风格的你还没点过，回复序号试试："
         )
         self._pending.setdefault(group_id, {})[user_id] = {
-            "mode": "search", "items": fresh, "page": 1, "ts": time.time(),
-            "kw": artist, "quality": "", "group_id": group_id,
+            "mode": "search",
+            "items": fresh,
+            "page": 1,
+            "ts": time.time(),
+            "kw": artist,
+            "quality": "",
+            "group_id": group_id,
         }
         page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
         return self._send_text(event, self._fmt_list(page_items, page, total, head))
@@ -880,9 +1014,13 @@ class MusicPlugin(Star):
         event = entry["event"]
         item = entry["item"]
         if self.blocked.is_blocked(item):
-            await event.send(MessageChain([Plain(f"⛔ 队列中「{item.title}」被屏蔽，已跳过～")]))
+            await event.send(
+                MessageChain([Plain(f"⛔ 队列中「{item.title}」被屏蔽，已跳过～")])
+            )
             return
-        url = await self.sources.first_media_url(item, quality=str(self._cfg("quality", "standard", group_id)))
+        url = await self.sources.first_media_url(
+            item, quality=str(self._cfg("quality", "standard", group_id))
+        )
         if url:
             voice_res = await self._try_voice(event, url, item)
             if voice_res is _URL_SENT:
@@ -897,12 +1035,18 @@ class MusicPlugin(Star):
             self._record_queue(group_id, entry)
             await event.send(MessageChain(segs))
         else:
-            await event.send(MessageChain([Plain(f"⚠️ 队列中「{item.title}」暂无法获取音频，已跳过～")]))
+            await event.send(
+                MessageChain(
+                    [Plain(f"⚠️ 队列中「{item.title}」暂无法获取音频，已跳过～")]
+                )
+            )
 
     def _record_queue(self, group_id: str, entry: dict):
         if self.stats is not None:
             try:
-                self.stats.record(entry["item"], entry["user_id"], entry["user_name"], group_id)
+                self.stats.record(
+                    entry["item"], entry["user_id"], entry["user_name"], group_id
+                )
             except Exception as e:
                 logger.warning(f"记录队列播放统计失败: {e}")
 
@@ -911,7 +1055,9 @@ class MusicPlugin(Star):
         limit = self._safe_int("queue_limit", 10, group_id)
         if len(q) >= limit:
             return f"队列已满（上限 {limit} 首），请稍后再试～"
-        q.append({"item": item, "event": event, "user_id": user_id, "user_name": user_name})
+        q.append(
+            {"item": item, "event": event, "user_id": user_id, "user_name": user_name}
+        )
         self._ensure_queue_task()
         pos = len(q)
         return f"🎧 已加入队列第 {pos} 位：{item.title} - {item.artist}（/song queue 查看队列）"
@@ -954,7 +1100,11 @@ class MusicPlugin(Star):
         # 30 秒轮询可能错过精确分钟：到达或超过目标时间即推送（同日仅一次，由 push_state 保证）
         if now < target:
             return
-        groups = [g.strip() for g in str(self._cfg("hot_push_groups", "")).replace("，", ",").split(",") if g.strip().isdigit()]
+        groups = [
+            g.strip()
+            for g in str(self._cfg("hot_push_groups", "")).replace("，", ",").split(",")
+            if g.strip().isdigit()
+        ]
         if not groups:
             return
         today = time.strftime("%Y-%m-%d")
@@ -1012,7 +1162,9 @@ class MusicPlugin(Star):
         """周报目标群：优先配置指定；为空时自动使用所有有点歌记录的群"""
         groups = [
             g.strip()
-            for g in str(self._cfg("weekly_report_groups", "")).replace("，", ",").split(",")
+            for g in str(self._cfg("weekly_report_groups", ""))
+            .replace("，", ",")
+            .split(",")
             if g.strip().isdigit()
         ]
         if groups:
@@ -1111,10 +1263,16 @@ class MusicPlugin(Star):
             # 周报：手动查看近 7 天点歌排行（群内=群榜，私聊=总榜）
             if kw in ("周报", "周榜"):
                 if self.stats is None:
-                    return self._send_text(event, "统计功能未启用（enable_stats=False）")
+                    return self._send_text(
+                        event, "统计功能未启用（enable_stats=False）"
+                    )
                 return self._send_text(event, self._weekly_report_text(group_id))
             # 热评点歌：/点歌 热评 <歌名>（播放 + 网易云热评）
-            if kw == "热评" or kw.startswith(("热评 ", "热评:", "热评：")) or kw.startswith("热评论"):
+            if (
+                kw == "热评"
+                or kw.startswith(("热评 ", "热评:", "热评："))
+                or kw.startswith("热评论")
+            ):
                 sub = re.sub(r"^热评论?[\s:：]*", "", kw).strip()
                 return await self._do_hot_comment(event, sub)
             # 个性化推荐：/点歌 推荐
@@ -1123,10 +1281,15 @@ class MusicPlugin(Star):
                     return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
                 return await self._do_recommend(event)
             # 批量点歌：/点歌 批量 歌1，歌2，歌3
-            if kw in ("批量", "连播", "多首") or kw.startswith(("批量 ", "连播 ", "多首 ")):
+            if kw in ("批量", "连播", "多首") or kw.startswith(
+                ("批量 ", "连播 ", "多首 ")
+            ):
                 names = kw.split(maxsplit=1)[1].strip() if " " in kw else ""
                 if not names:
-                    return self._send_text(event, "批量点歌用法: /点歌 批量 歌1，歌2，歌3（最多 5 首，用逗号/顿号分隔）")
+                    return self._send_text(
+                        event,
+                        "批量点歌用法: /点歌 批量 歌1，歌2，歌3（最多 5 首，用逗号/顿号分隔）",
+                    )
                 if not self._check_frequency(str(event.get_sender_id()), group_id):
                     return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
                 return await self._do_batch(event, names)
@@ -1134,7 +1297,9 @@ class MusicPlugin(Star):
             if kw.startswith(("歌词本", "看歌词", "完整歌词")):
                 sub = re.sub(r"^(歌词本|看歌词|完整歌词)[\s:：]*", "", kw).strip()
                 if not sub:
-                    return self._send_text(event, "歌词本用法: /点歌 歌词本 <歌名>（仅网易云歌曲有歌词）")
+                    return self._send_text(
+                        event, "歌词本用法: /点歌 歌词本 <歌名>（仅网易云歌曲有歌词）"
+                    )
                 if not self._check_frequency(str(event.get_sender_id()), group_id):
                     return self._send_text(event, "⏳ 点歌太频繁啦，休息一下再点～")
                 return await self._do_lyric_full(event, sub)
@@ -1211,7 +1376,9 @@ class MusicPlugin(Star):
 
     async def _do_lyric_full(self, event, keyword: str) -> MessageEventResult | None:
         """完整歌词：/点歌 歌词本 <歌名>（取最佳结果，仅网易云有歌词）"""
-        limit = int(self._cfg("search_limit", 5, str(event.get_group_id() or "private")))
+        limit = int(
+            self._cfg("search_limit", 5, str(event.get_group_id() or "private"))
+        )
         results = await self.sources.search_all(keyword, limit=limit)
         items = [it for _, its in results for it in its]
         items = [it for it in items if not self.blocked.is_blocked(it)]
@@ -1219,7 +1386,10 @@ class MusicPlugin(Star):
             return self._send_text(event, f"😢 没有找到「{keyword}」这首歌～")
         item = items[0]
         if item.source != "netease":
-            return self._send_text(event, f"「{item.title}」来自 {item.source}，暂不支持歌词显示（仅网易云）～")
+            return self._send_text(
+                event,
+                f"「{item.title}」来自 {item.source}，暂不支持歌词显示（仅网易云）～",
+            )
         try:
             lyric = await self.sources.get_lyric(item, max_lines=60)
         except Exception:
@@ -1241,13 +1411,19 @@ class MusicPlugin(Star):
         group_id = str(event.get_group_id() or "private")
         pending = self._pending.get(group_id)
         if not pending:
-            return self._send_text(event, "当前没有进行中的选歌列表，发「/点歌 歌名」开始吧～")
+            return self._send_text(
+                event, "当前没有进行中的选歌列表，发「/点歌 歌名」开始吧～"
+            )
         user_id = str(event.get_sender_id())
         sess = pending.get(user_id)
         if not sess:
-            return self._send_text(event, "你当前没有选歌列表，发「/点歌 歌名」开始吧～")
+            return self._send_text(
+                event, "你当前没有选歌列表，发「/点歌 歌名」开始吧～"
+            )
         try:
-            if time.time() - sess["ts"] > self._safe_int("select_timeout", 30, group_id):
+            if time.time() - sess["ts"] > self._safe_int(
+                "select_timeout", 30, group_id
+            ):
                 pending.pop(user_id, None)
                 if not pending:
                     self._pending.pop(group_id, None)
@@ -1292,7 +1468,9 @@ class MusicPlugin(Star):
         if not m:
             return None
         try:
-            if time.time() - sess["ts"] > self._safe_int("select_timeout", 30, group_id):
+            if time.time() - sess["ts"] > self._safe_int(
+                "select_timeout", 30, group_id
+            ):
                 pending.pop(user_id, None)
                 if not pending:
                     self._pending.pop(group_id, None)
@@ -1317,7 +1495,12 @@ class MusicPlugin(Star):
                 return self._send_text(event, ("✅ " if ok else "") + msg)
             if mode == "queue":
                 # 排队选择
-                return self._send_text(event, self._enqueue(group_id, item, event, user_id, event.get_sender_name() or ""))
+                return self._send_text(
+                    event,
+                    self._enqueue(
+                        group_id, item, event, user_id, event.get_sender_name() or ""
+                    ),
+                )
             return await self._play_item(event, item, sess.get("kw", ""), sess)
         finally:
             event.stop_event()
@@ -1329,32 +1512,43 @@ class MusicPlugin(Star):
             text = event.message_str.strip()
             group_id = str(event.get_group_id() or "private")
             user_id = str(event.get_sender_id())
-            m = re.match(r"^/?song\s+set\s+([\w_]+)\s+(.+)$", text, re.S)
+            m = re.match(r"^/?song\s+set\s+([\w_]+)\s+(.+)$", text, re.DOTALL)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
-                return await self._do_set(event, m.group(1), m.group(2), group_id, per_group=False)
-            m = re.match(r"^/?song\s+gset\s+([\w_]+)\s+(.+)$", text, re.S)
+                return await self._do_set(
+                    event, m.group(1), m.group(2), group_id, per_group=False
+                )
+            m = re.match(r"^/?song\s+gset\s+([\w_]+)\s+(.+)$", text, re.DOTALL)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
-                return await self._do_set(event, m.group(1), m.group(2), group_id, per_group=True)
+                return await self._do_set(
+                    event, m.group(1), m.group(2), group_id, per_group=True
+                )
             m = re.match(r"^/?song\s+greset(?:\s+([\w_]+))?$", text)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
                 key = m.group(1)
                 ok = self.groups.reset_key(group_id, key)
-                return self._send_text(event, f"✅ 已清除本群配置{'「' + key + '」' if key else ''}" if ok else f"本群没有{'该' if key else '任何'}群配置")
-            m = re.match(r"^/?song\s+block\s+(.+)$", text, re.S)
+                return self._send_text(
+                    event,
+                    f"✅ 已清除本群配置{'「' + key + '」' if key else ''}"
+                    if ok
+                    else f"本群没有{'该' if key else '任何'}群配置",
+                )
+            m = re.match(r"^/?song\s+block\s+(.+)$", text, re.DOTALL)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
                 term = m.group(1).strip()
                 if self.blocked.block(term):
-                    return self._send_text(event, f"⛔ 已屏蔽词「{term}」（匹配歌曲标题/歌手）")
+                    return self._send_text(
+                        event, f"⛔ 已屏蔽词「{term}」（匹配歌曲标题/歌手）"
+                    )
                 return self._send_text(event, f"「{term}」已在屏蔽列表中")
-            m = re.match(r"^/?song\s+unblock\s+(.+)$", text, re.S)
+            m = re.match(r"^/?song\s+unblock\s+(.+)$", text, re.DOTALL)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
@@ -1367,20 +1561,48 @@ class MusicPlugin(Star):
                 terms = self.blocked.list()
                 if not terms:
                     return self._send_text(event, "当前没有屏蔽词。/song block 词 添加")
-                return self._send_text(event, "⛔ 屏蔽词列表:\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(terms, 1)))
+                return self._send_text(
+                    event,
+                    "⛔ 屏蔽词列表:\n"
+                    + "\n".join(f"{i}. {t}" for i, t in enumerate(terms, 1)),
+                )
             m = re.match(r"^/?song\s+fav(?:\s+del\s+(\d{1,2}))?$", text)
             if m:
                 if m.group(1):
                     ok = self.favs.remove(user_id, int(m.group(1)))
-                    return self._send_text(event, "✅ 已删除该收藏" if ok else "❌ 序号不对哦，/song fav 查看你的收藏")
+                    return self._send_text(
+                        event,
+                        "✅ 已删除该收藏"
+                        if ok
+                        else "❌ 序号不对哦，/song fav 查看你的收藏",
+                    )
                 items = self._fav_items(user_id)
                 if not items:
-                    return self._send_text(event, "你还没有收藏。发「/点歌 收藏 歌名」试试～")
+                    return self._send_text(
+                        event, "你还没有收藏。发「/点歌 收藏 歌名」试试～"
+                    )
                 self._pending.setdefault(group_id, {})[user_id] = {
-                    "mode": "favlist", "items": items, "page": 1, "ts": time.time(), "kw": "收藏", "quality": "", "group_id": group_id,
+                    "mode": "favlist",
+                    "items": items,
+                    "page": 1,
+                    "ts": time.time(),
+                    "kw": "收藏",
+                    "quality": "",
+                    "group_id": group_id,
                 }
-                page_items, page, total = self._page_items(self._pending[group_id][user_id], 1)
-                return self._send_text(event, self._fmt_list(page_items, page, total, f"🎵 我的收藏（共 {len(items)} 首），回复序号播放：" + "，/song fav del 序号 删除"))
+                page_items, page, total = self._page_items(
+                    self._pending[group_id][user_id], 1
+                )
+                return self._send_text(
+                    event,
+                    self._fmt_list(
+                        page_items,
+                        page,
+                        total,
+                        f"🎵 我的收藏（共 {len(items)} 首），回复序号播放："
+                        + "，/song fav del 序号 删除",
+                    ),
+                )
             m = re.match(r"^/?song\s+queue(?:\s+(\w+))?$", text)
             if m:
                 sub = m.group(1)
@@ -1394,7 +1616,7 @@ class MusicPlugin(Star):
                     self._ensure_queue_task()
                     return self._send_text(event, "⏭️ 即将播放下一首～")
                 return self._show_queue(event, group_id)
-            m = re.match(r"^/?song\s+login(?:\s+(.+))?$", text, re.S)
+            m = re.match(r"^/?song\s+login(?:\s+(.+))?$", text, re.DOTALL)
             if m:
                 if not self._is_admin(event):
                     return self._send_text(event, "⚠️ 只有管理员可以使用该指令")
@@ -1407,14 +1629,18 @@ class MusicPlugin(Star):
         finally:
             event.stop_event()
 
-    async def _do_netease_login(self, event, arg: str, user_id: str, group_id: str) -> MessageEventResult:
+    async def _do_netease_login(
+        self, event, arg: str, user_id: str, group_id: str
+    ) -> MessageEventResult:
         """网易云登录：/song login（扫码）、/song login sms 手机号（发验证码）、/song login sms 手机号 验证码（登录）"""
         if not arg:
             # 扫码登录：生成二维码并后台轮询
             if group_id in self._login_tasks:
-                return self._send_text(event, "⏳ 已有扫码登录进行中，请先在手机端确认或等待超时～")
+                return self._send_text(
+                    event, "⏳ 已有扫码登录进行中，请先在手机端确认或等待超时～"
+                )
             return await self._start_qrcode_login(event, group_id)
-        m = re.match(r"^sms\s+(\d{5,15})(?:\s+(\d{4,6}))?$", arg, re.S)
+        m = re.match(r"^sms\s+(\d{5,15})(?:\s+(\d{4,6}))?$", arg, re.DOTALL)
         if not m:
             return self._send_text(
                 event,
@@ -1427,18 +1653,26 @@ class MusicPlugin(Star):
             res = await sms_send(self.sources.session, phone)
             if res["ok"]:
                 self._sms_sessions[user_id] = {"phone": phone, "ts": time.time()}
-            return self._send_text(event, ("✅ " if res["ok"] else "❌ ") + res["message"])
+            return self._send_text(
+                event, ("✅ " if res["ok"] else "❌ ") + res["message"]
+            )
         # 验证码登录
         res = await sms_login(self.sources.session, phone, captcha)
         if not res["ok"]:
             return self._send_text(event, "❌ " + res["message"])
         cookie = res.get("cookie", "")
         if not cookie:
-            return self._send_text(event, "⚠️ 登录成功但未获取到 Cookie，请重试或改用扫码登录")
+            return self._send_text(
+                event, "⚠️ 登录成功但未获取到 Cookie，请重试或改用扫码登录"
+            )
         self._save_netease_cookie(cookie)
         self._sms_sessions.pop(user_id, None)
-        logger.info(f"[netease-login] 手机号验证码登录成功: {phone[:3]}****{phone[-4:]}")
-        return self._send_text(event, f"✅ 网易云登录成功（{phone}）！VIP 歌曲直链已解锁～")
+        logger.info(
+            f"[netease-login] 手机号验证码登录成功: {phone[:3]}****{phone[-4:]}"
+        )
+        return self._send_text(
+            event, f"✅ 网易云登录成功（{phone}）！VIP 歌曲直链已解锁～"
+        )
 
     async def _start_qrcode_login(self, event, group_id: str) -> MessageEventResult:
         """扫码登录：获取 unikey → 生成二维码 → 后台轮询（60 秒 × 5s）"""
@@ -1468,7 +1702,15 @@ class MusicPlugin(Star):
                     continue
                 code = res.get("code")
                 if code == 800:
-                    await event.send(MessageChain([Plain("⏳ 二维码已过期，请重新发送 /song login 获取新二维码～")]))
+                    await event.send(
+                        MessageChain(
+                            [
+                                Plain(
+                                    "⏳ 二维码已过期，请重新发送 /song login 获取新二维码～"
+                                )
+                            ]
+                        )
+                    )
                     return
                 if code == 802:
                     msg = "📱 已扫码！请在手机上确认登录～"
@@ -1477,10 +1719,16 @@ class MusicPlugin(Star):
                 elif code == 803:
                     cookies = res.get("cookies") or []
                     if not cookies:
-                        await event.send(MessageChain([Plain("⚠️ 扫码成功但未获取到 Cookie，请重试")]))
+                        await event.send(
+                            MessageChain([Plain("⚠️ 扫码成功但未获取到 Cookie，请重试")])
+                        )
                         return
                     self._save_netease_cookie("; ".join(cookies))
-                    await event.send(MessageChain([Plain("✅ 网易云扫码登录成功！VIP 歌曲直链已解锁～")]))
+                    await event.send(
+                        MessageChain(
+                            [Plain("✅ 网易云扫码登录成功！VIP 歌曲直链已解锁～")]
+                        )
+                    )
                     logger.info("[netease-login] 扫码登录成功")
                     return
                 else:
@@ -1490,14 +1738,23 @@ class MusicPlugin(Star):
                     await event.send(MessageChain([Plain(msg)]))
                     last_msg = msg
                 await asyncio.sleep(5)
-            await event.send(MessageChain([Plain("⏳ 扫码登录超时，请重新发送 /song login 获取新二维码～")]))
+            await event.send(
+                MessageChain(
+                    [Plain("⏳ 扫码登录超时，请重新发送 /song login 获取新二维码～")]
+                )
+            )
 
         self._login_tasks[group_id] = asyncio.create_task(_poll())
         self._login_tasks[group_id].add_done_callback(
             lambda _t: self._login_tasks.pop(group_id, None)
         )
         chain = MessageChain(
-            [Plain("📱 请使用手机网易云 App 扫码登录（60 秒内有效，登录后 VIP 歌曲直链自动解锁）：\n"), img]
+            [
+                Plain(
+                    "📱 请使用手机网易云 App 扫码登录（60 秒内有效，登录后 VIP 歌曲直链自动解锁）：\n"
+                ),
+                img,
+            ]
         )
         return event.chain_result(chain)
 
@@ -1523,33 +1780,49 @@ class MusicPlugin(Star):
         try:
             from .store import JsonStore
 
-            store = JsonStore(
-                os.path.join(self.data_dir, "netease_cookie.json"), {}
-            )
+            store = JsonStore(os.path.join(self.data_dir, "netease_cookie.json"), {})
             store.data["netease_cookie"] = cookie_str
-            store.data["updated_at"] = (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
+            store.data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             store.save()
             logger.info("[netease-login] Cookie 已持久化到插件数据目录")
         except Exception as e:
             logger.warning(f"[netease-login] Cookie 持久化失败（重启后可能丢失）: {e}")
 
-    async def _do_set(self, event, key: str, value, group_id: str, per_group: bool) -> MessageEventResult:
+    async def _do_set(
+        self, event, key: str, value, group_id: str, per_group: bool
+    ) -> MessageEventResult:
         """设置配置（全局 / 群级）"""
         if key not in ADMIN_KEYS:
-            return self._send_text(event, f"未知配置项: {key}。可用: {', '.join(ADMIN_KEYS)}")
+            return self._send_text(
+                event, f"未知配置项: {key}。可用: {', '.join(ADMIN_KEYS)}"
+            )
         # 值类型转换
-        if key in ("search_limit", "select_timeout", "frequency_seconds", "queue_limit", "queue_interval", "daily_limit", "cache_max_mb"):
+        if key in (
+            "search_limit",
+            "select_timeout",
+            "frequency_seconds",
+            "queue_limit",
+            "queue_interval",
+            "daily_limit",
+            "cache_max_mb",
+        ):
             try:
                 value = int(value)
             except ValueError:
                 return self._send_text(event, "该项需要数字")
-        if key in ("enable_card", "enable_artwork", "enable_lyric", "hot_push_enable", "weekly_report_enable"):
+        if key in (
+            "enable_card",
+            "enable_artwork",
+            "enable_lyric",
+            "hot_push_enable",
+            "weekly_report_enable",
+        ):
             value = str(value).lower() in ("1", "true", "on", "yes")
         if per_group:
             self.groups.set_key(group_id, key, value)
-            return self._send_text(event, f"✅ 已设置本群 {key} = {value}（/song greset {key} 还原）")
+            return self._send_text(
+                event, f"✅ 已设置本群 {key} = {value}（/song greset {key} 还原）"
+            )
         self.config[key] = value
         if key in ("sources", "netease_cookie"):
             self.sources.reload()
@@ -1557,10 +1830,18 @@ class MusicPlugin(Star):
             self._sync_order_aliases()
         if key in ("hot_push_enable", "hot_push_time", "hot_push_groups"):
             self._ensure_push_task()
-        if key in ("weekly_report_enable", "weekly_report_time", "weekly_report_weekday", "weekly_report_groups"):
+        if key in (
+            "weekly_report_enable",
+            "weekly_report_time",
+            "weekly_report_weekday",
+            "weekly_report_groups",
+        ):
             if self.stats is not None:
                 self._ensure_report_task()
-        return self._send_text(event, f"✅ 已更新全局 {key} = {value}（重启后若想保留请同步修改 WebUI 配置）")
+        return self._send_text(
+            event,
+            f"✅ 已更新全局 {key} = {value}（重启后若想保留请同步修改 WebUI 配置）",
+        )
 
     def _show_queue(self, event, group_id: str) -> MessageEventResult:
         q = self._queues.get(group_id) or []
@@ -1569,7 +1850,9 @@ class MusicPlugin(Star):
         lines = [f"🎧 本群播放队列（{len(q)} 首）:"]
         for i, e in enumerate(q, 1):
             it = e["item"]
-            lines.append(f"{i}. {it.title} - {it.artist}（由 {e['user_name'] or e['user_id']} 添加）")
+            lines.append(
+                f"{i}. {it.title} - {it.artist}（由 {e['user_name'] or e['user_id']} 添加）"
+            )
         lines.append("提示: /song queue clear 清空 · /song queue next 跳下一首")
         return self._send_text(event, "\n".join(lines))
 
@@ -1577,7 +1860,9 @@ class MusicPlugin(Star):
         """输出插件运行状态摘要（源、队列、缓存与登录态）"""
         sources_list = ", ".join(self.sources.order) or "无"
         queued = sum(len(q) for q in self._queues.values())
-        has_cookie = "已配置" if (self._cfg("netease_cookie", "") or "").strip() else "未配置"
+        has_cookie = (
+            "已配置" if (self._cfg("netease_cookie", "") or "").strip() else "未配置"
+        )
         cache_files = 0
         cache_bytes = 0
         cache_dir = self._cache_dir()
@@ -1637,17 +1922,23 @@ class MusicPlugin(Star):
             for task in (self._queue_task, self._push_task, self._report_task):
                 if task is not None and not task.done():
                     task.cancel()
+            if hasattr(self, "sources") and hasattr(self.sources, "close"):
+                self.sources.close()
         except Exception:
             pass
 
     def hub_status(self) -> dict:
         today = time.strftime("%Y-%m-%d")
-        bonus_users = len((getattr(self, "_hub_bonus_quota", {}).get(today) or {}))
+        bonus_users = len(getattr(self, "_hub_bonus_quota", {}).get(today) or {})
         queued = sum(len(q) for q in self._queues.values())
         return {
             "version": PLUGIN_VERSION,
             "status": "online",
-            "metrics": {"队列待播": queued, "今日运势加额人": bonus_users, "语音模式": str(self._cfg("voice_mode", "url"))},
+            "metrics": {
+                "队列待播": queued,
+                "今日运势加额人": bonus_users,
+                "语音模式": str(self._cfg("voice_mode", "url")),
+            },
             "actions": ["get_stats", "grant_bonus_quota"],
         }
 
@@ -1655,7 +1946,15 @@ class MusicPlugin(Star):
         p = params or {}
         if action == "get_stats":
             today = time.strftime("%Y-%m-%d")
-            return {"ok": True, "data": {"queued": sum(len(q) for q in self._queues.values()), "bonus_today": dict(getattr(self, "_hub_bonus_quota", {}).get(today) or {})}}
+            return {
+                "ok": True,
+                "data": {
+                    "queued": sum(len(q) for q in self._queues.values()),
+                    "bonus_today": dict(
+                        getattr(self, "_hub_bonus_quota", {}).get(today) or {}
+                    ),
+                },
+            }
         if action == "grant_bonus_quota":
             uid = str(p.get("user_id", "")).strip()
             bonus = max(1, int(p.get("bonus", 2)))
@@ -1666,5 +1965,8 @@ class MusicPlugin(Star):
                 self._hub_bonus_quota = {}
             day_map = self._hub_bonus_quota.setdefault(today, {})
             day_map[uid] = int(day_map.get(uid, 0)) + bonus
-            return {"ok": True, "data": {"user_id": uid, "date": today, "bonus_total": day_map[uid]}}
+            return {
+                "ok": True,
+                "data": {"user_id": uid, "date": today, "bonus_total": day_map[uid]},
+            }
         return {"ok": False, "error": f"不支持的动作：{action}"}

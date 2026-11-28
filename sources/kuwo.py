@@ -15,9 +15,9 @@ SEARCH_URL = "http://search.kuwo.cn/r.s"
 PLAY_URL = "http://antiserver.kuwo.cn/anti.s"
 RANK_URL = "http://search.kuwo.cn/r.s"
 RANK_IDS = {
-    "飙升榜": "MUSIC_TOP_100",      # 飙升榜
-    "热歌榜": "MUSIC_TOP_50",       # 热歌榜
-    "新歌榜": "MUSIC_TOP_20",       # 新歌榜
+    "飙升榜": "MUSIC_TOP_100",  # 飙升榜
+    "热歌榜": "MUSIC_TOP_50",  # 热歌榜
+    "新歌榜": "MUSIC_TOP_20",  # 新歌榜
 }
 
 
@@ -46,8 +46,14 @@ class KuwoSource(MusicSource):
             r = self.session.get(
                 SEARCH_URL,
                 params={
-                    "all": keyword, "ft": "music", "itemset": "web_2013",
-                    "client": "kt", "pn": 0, "rn": limit, "rformat": "json", "encoding": "utf8",
+                    "all": keyword,
+                    "ft": "music",
+                    "itemset": "web_2013",
+                    "client": "kt",
+                    "pn": 0,
+                    "rn": limit,
+                    "rformat": "json",
+                    "encoding": "utf8",
                 },
                 headers=self._headers(),
                 timeout=12,
@@ -84,10 +90,16 @@ class KuwoSource(MusicSource):
 
     async def get_media_url(self, item: MusicItem, quality: str = "standard") -> str:
         """antiserver 转换接口：返回 JSON 或纯 URL"""
+
         def _do():
             r = self.session.get(
                 PLAY_URL,
-                params={"type": "convert_url3", "rid": f"MUSIC_{item.id}", "format": "mp3|aac", "response": "url"},
+                params={
+                    "type": "convert_url3",
+                    "rid": f"MUSIC_{item.id}",
+                    "format": "mp3|aac",
+                    "response": "url",
+                },
                 headers=self._headers(),
                 timeout=15,
             )
@@ -101,19 +113,28 @@ class KuwoSource(MusicSource):
                 url = txt
             if url.startswith("http"):
                 return url
-            logger.warning(f"[kuwo] 播放地址获取失败（可能被风控）: {item.title}, response={txt[:120]}")
+            logger.warning(
+                f"[kuwo] 播放地址获取失败（可能被风控）: {item.title}, response={txt[:120]}"
+            )
         except Exception as e:
             logger.warning(f"[kuwo] 播放地址获取异常: {e}")
         return ""
 
     async def get_hot(self, limit: int = 5) -> list[MusicItem]:
         """热歌榜（ft=music 榜单模式）"""
+
         def _do():
             r = self.session.get(
                 RANK_URL,
                 params={
-                    "all": "", "ft": "music", "itemset": "web_2013",
-                    "client": "kt", "pn": 0, "rn": limit, "rformat": "json", "encoding": "utf8",
+                    "all": "",
+                    "ft": "music",
+                    "itemset": "web_2013",
+                    "client": "kt",
+                    "pn": 0,
+                    "rn": limit,
+                    "rformat": "json",
+                    "encoding": "utf8",
                     "rank": "热歌榜",
                 },
                 headers=self._headers(),

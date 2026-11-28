@@ -69,7 +69,9 @@ class BilibiliSource(MusicSource):
             artist=v.get("author") or ((v.get("owner") or {}).get("name", "")),
             album=str(v.get("bvid") or v.get("aid") or ""),
             duration=duration,
-            artwork=("https:" + v["pic"]) if str(v.get("pic", "")).startswith("//") else (v.get("pic") or ""),
+            artwork=("https:" + v["pic"])
+            if str(v.get("pic", "")).startswith("//")
+            else (v.get("pic") or ""),
             extra={"aid": v.get("aid"), "bvid": v.get("bvid"), "cid": v.get("cid")},
         )
 
@@ -80,9 +82,15 @@ class BilibiliSource(MusicSource):
             r = self.session.get(
                 SEARCH_URL,
                 params={
-                    "search_type": "video", "keyword": keyword, "page": 1,
-                    "page_size": limit, "highlight": 1, "single_column": 0,
-                    "platform": "pc", "from_source": "", "dynamic_offset": 0,
+                    "search_type": "video",
+                    "keyword": keyword,
+                    "page": 1,
+                    "page_size": limit,
+                    "highlight": 1,
+                    "single_column": 0,
+                    "platform": "pc",
+                    "from_source": "",
+                    "dynamic_offset": 0,
                 },
                 headers={
                     "cookie": cookie,
@@ -100,7 +108,9 @@ class BilibiliSource(MusicSource):
             logger.warning(f"[bilibili] 搜索「{keyword}」请求异常: {e}")
             return []
         if j.get("code") != 0:
-            logger.warning(f"[bilibili] 搜索「{keyword}」被拒绝, code={j.get('code')}, msg={j.get('message', '')}")
+            logger.warning(
+                f"[bilibili] 搜索「{keyword}」被拒绝, code={j.get('code')}, msg={j.get('message', '')}"
+            )
             return []
         results = (j.get("data") or {}).get("result") or []
         if not results:
@@ -112,15 +122,29 @@ class BilibiliSource(MusicSource):
         qmap = {"low": 0, "standard": 1, "high": 2, "super": -1}
 
         def _do():
-            params = {"bvid": item.extra.get("bvid")} if item.extra.get("bvid") else {"aid": item.extra.get("aid")}
+            params = (
+                {"bvid": item.extra.get("bvid")}
+                if item.extra.get("bvid")
+                else {"aid": item.extra.get("aid")}
+            )
             cid = item.extra.get("cid")
             if not cid:
-                r = self.session.get(VIEW_URL, params=params, headers={"referer": "https://www.bilibili.com/"}, timeout=12)
+                r = self.session.get(
+                    VIEW_URL,
+                    params=params,
+                    headers={"referer": "https://www.bilibili.com/"},
+                    timeout=12,
+                )
                 cid = (r.json().get("data") or {}).get("cid")
             if not cid:
                 return ""
-            r2 = self.session.get(PLAYURL_URL, params={**params, "cid": cid, "fnval": 16}, headers={"referer": "https://www.bilibili.com/"}, timeout=12)
-            data = (r2.json().get("data") or {})
+            r2 = self.session.get(
+                PLAYURL_URL,
+                params={**params, "cid": cid, "fnval": 16},
+                headers={"referer": "https://www.bilibili.com/"},
+                timeout=12,
+            )
+            data = r2.json().get("data") or {}
             audios = (data.get("dash") or {}).get("audio") or []
             if not audios:
                 durl = data.get("durl")
@@ -136,7 +160,9 @@ class BilibiliSource(MusicSource):
         try:
             url = await asyncio.to_thread(_do)
             if not url:
-                logger.warning(f"[bilibili] 播放地址获取失败（可能被风控）: {item.title}")
+                logger.warning(
+                    f"[bilibili] 播放地址获取失败（可能被风控）: {item.title}"
+                )
             return url
         except Exception as e:
             logger.warning(f"[bilibili] 播放地址获取异常: {e}")
@@ -161,7 +187,9 @@ class BilibiliSource(MusicSource):
             logger.warning(f"[bilibili] 热门榜单获取异常: {e}")
             return []
         if j.get("code") != 0:
-            logger.warning(f"[bilibili] 热门榜单被拒绝, code={j.get('code')}, msg={j.get('message', '')}")
+            logger.warning(
+                f"[bilibili] 热门榜单被拒绝, code={j.get('code')}, msg={j.get('message', '')}"
+            )
             return []
         items = []
         for v in (j.get("data") or {}).get("list") or []:
@@ -187,7 +215,7 @@ class BilibiliSource(MusicSource):
 
     async def parse_share(self, text: str) -> MusicItem | None:
         """解析 B 站分享链接（bilibili.com/video/BVxxx 或短链）→ 歌曲"""
-        m = re.search(r"bilibili\.com/video/(BV[0-9A-Za-z]+)", text, re.I)
+        m = re.search(r"bilibili\.com/video/(BV[0-9A-Za-z]+)", text, re.IGNORECASE)
         if not m:
             m = re.search(r"(BV[0-9A-Za-z]{10})", text)
         if not m:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AstrBot 插件中枢标准联动桥接模块（零强依赖：未安装 astrbot_plugin_hub 时静默空操作）。"""
 
 from __future__ import annotations

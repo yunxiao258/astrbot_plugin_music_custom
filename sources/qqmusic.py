@@ -17,7 +17,9 @@ VKEY_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
 DETAIL_URL = "https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg"
 
 # 分享链接：y.qq.com/n/ryqq/songDetail/xxx / song.html?songmid=xxx / songmid=xxx
-SHARE_RE = re.compile(r"songDetail/([A-Za-z0-9]+)|songmid=([A-Za-z0-9]+)", re.I)
+SHARE_RE = re.compile(
+    r"songDetail/([A-Za-z0-9]+)|songmid=([A-Za-z0-9]+)", re.IGNORECASE
+)
 
 
 class QQMusicSource(MusicSource):
@@ -73,7 +75,11 @@ class QQMusicSource(MusicSource):
                     artist=singers,
                     album=s.get("albumname", ""),
                     duration=int(s.get("interval", 0) or 0),
-                    artwork=(s.get("albummid") and f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{s.get('albummid')}.jpg") or "",
+                    artwork=(
+                        s.get("albummid")
+                        and f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{s.get('albummid')}.jpg"
+                    )
+                    or "",
                     url=f"https://i.y.qq.com/n2/m/share/details/song.html?songid={s.get('songid', '')}",
                     extra={"songid": int(s.get("songid") or 0) or 0},
                 )
@@ -82,17 +88,32 @@ class QQMusicSource(MusicSource):
 
     async def get_media_url(self, item: MusicItem, quality: str = "standard") -> str:
         """尝试获取 vkey 直链（可能被风控，失败返回空，调用方回退卡片/换源）"""
+
         def _do():
             guid = str(int(time.time() * 1000))[-10:]
-            data = json.dumps({
-                "req_0": {
-                    "module": "vkey.GetVkeyServer", "method": "CgiGetVkey",
-                    "param": {"guid": guid, "songmid": [item.id], "songtype": [0],
-                             "uin": "0", "loginflag": 1, "platform": "20"},
-                },
-                "comm": {"uin": 0, "format": "json", "ct": 24, "cv": 0},
-            })
-            r = self.session.get(VKEY_URL, params={"format": "json", "data": data}, headers=self._headers(), timeout=12)
+            data = json.dumps(
+                {
+                    "req_0": {
+                        "module": "vkey.GetVkeyServer",
+                        "method": "CgiGetVkey",
+                        "param": {
+                            "guid": guid,
+                            "songmid": [item.id],
+                            "songtype": [0],
+                            "uin": "0",
+                            "loginflag": 1,
+                            "platform": "20",
+                        },
+                    },
+                    "comm": {"uin": 0, "format": "json", "ct": 24, "cv": 0},
+                }
+            )
+            r = self.session.get(
+                VKEY_URL,
+                params={"format": "json", "data": data},
+                headers=self._headers(),
+                timeout=12,
+            )
             return r.json()
 
         try:
@@ -113,7 +134,8 @@ class QQMusicSource(MusicSource):
             "id": item.extra.get("songid") or 0,
             "title": item.title,
             "content": item.artist,
-            "url": item.url or f"https://i.y.qq.com/n2/m/share/details/song.html?songmid={item.id}",
+            "url": item.url
+            or f"https://i.y.qq.com/n2/m/share/details/song.html?songmid={item.id}",
             "image": item.artwork,
         }
 
@@ -129,7 +151,12 @@ class QQMusicSource(MusicSource):
         def _do():
             r = self.session.get(
                 DETAIL_URL,
-                params={"songmid": mid, "format": "json", "inCharset": "utf8", "outCharset": "utf8"},
+                params={
+                    "songmid": mid,
+                    "format": "json",
+                    "inCharset": "utf8",
+                    "outCharset": "utf8",
+                },
                 headers=self._headers(),
                 timeout=12,
             )
@@ -140,11 +167,11 @@ class QQMusicSource(MusicSource):
         except Exception as e:
             logger.warning(f"[qqmusic] 解析链接失败 {mid}: {e}")
             return None
-        song = ((j.get("data") or [None]))[0] if j.get("data") else None
+        song = (j.get("data") or [None])[0] if j.get("data") else None
         if not song:
             return None
         singers = ", ".join(x.get("name", "") for x in song.get("singer") or [])
-        album = (song.get("album") or {})
+        album = song.get("album") or {}
         albummid = album.get("mid", "") or ""
         return MusicItem(
             source=self.name,
@@ -153,7 +180,11 @@ class QQMusicSource(MusicSource):
             artist=singers,
             album=album.get("name", ""),
             duration=int(song.get("interval", 0) or 0),
-            artwork=(albummid and f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{albummid}.jpg") or "",
+            artwork=(
+                albummid
+                and f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{albummid}.jpg"
+            )
+            or "",
             url=f"https://i.y.qq.com/n2/m/share/details/song.html?songid={song.get('id', '')}",
             extra={"songid": int(song.get("id") or 0) or 0},
         )

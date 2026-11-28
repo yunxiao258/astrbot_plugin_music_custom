@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 """music_custom 插件单元测试：配置读取、管理员判定、限频、结果合并去重、缓存清理"""
+
 import asyncio
 import os
 import shutil
@@ -161,7 +161,9 @@ class TestConfig(unittest.TestCase):
 class TestMerge(unittest.TestCase):
     @staticmethod
     def _item(title, artist, source="netease"):
-        return SimpleNamespace(title=title, artist=artist, source=source, display=f"{title}-{artist}")
+        return SimpleNamespace(
+            title=title, artist=artist, source=source, display=f"{title}-{artist}"
+        )
 
     def test_norm(self):
         # 全角→半角、去空格/标点、小写
@@ -299,8 +301,13 @@ class TestNewFeatures(unittest.TestCase):
 
     def test_batch_order_caps_at_5(self):
         p = self._plugin()
-        p.sources.by_kw = {f"歌{i}": [mk_item(title=f"歌{i}", artist="A", mid=str(i))] for i in range(8)}
-        result = asyncio.run(p._do_batch(FakeEvent("u1"), "，".join(f"歌{i}" for i in range(8))))
+        p.sources.by_kw = {
+            f"歌{i}": [mk_item(title=f"歌{i}", artist="A", mid=str(i))]
+            for i in range(8)
+        }
+        result = asyncio.run(
+            p._do_batch(FakeEvent("u1"), "，".join(f"歌{i}" for i in range(8)))
+        )
         text = self._text(result)
         self.assertIn("批量点歌完成（5 首）", text)
 
@@ -328,16 +335,23 @@ class TestNewFeatures(unittest.TestCase):
         state = {"used": 0}
         p.quota = SimpleNamespace(
             used_today=lambda uid, day: state["used"],
-            consume=lambda uid, day: (state.__setitem__("used", state["used"] + 1) or state["used"]),
+            consume=lambda uid, day: (
+                state.__setitem__("used", state["used"] + 1) or state["used"]
+            ),
         )
-        p.sources.by_kw = {"歌一": [mk_item(title="歌一", mid="1")], "歌二": [mk_item(title="歌二", mid="2")]}
+        p.sources.by_kw = {
+            "歌一": [mk_item(title="歌一", mid="1")],
+            "歌二": [mk_item(title="歌二", mid="2")],
+        }
         result = asyncio.run(p._do_batch(FakeEvent("u1"), "歌一，歌二"))
         text = self._text(result)
         self.assertIn("未播放", text)
 
     def test_lyric_full_netease(self):
         p = self._plugin()
-        p.sources.by_kw = {"某歌": [mk_item(source="netease", title="某歌", artist="N", mid="9")]}
+        p.sources.by_kw = {
+            "某歌": [mk_item(source="netease", title="某歌", artist="N", mid="9")]
+        }
         result = asyncio.run(p._do_lyric_full(FakeEvent("u1"), "某歌"))
         text = self._text(result)
         self.assertIn("某歌 - N", text)
@@ -346,7 +360,9 @@ class TestNewFeatures(unittest.TestCase):
 
     def test_lyric_full_non_netease_hint(self):
         p = self._plugin()
-        p.sources.by_kw = {"某歌": [mk_item(source="kuwo", title="某歌", artist="K", mid="9")]}
+        p.sources.by_kw = {
+            "某歌": [mk_item(source="kuwo", title="某歌", artist="K", mid="9")]
+        }
         result = asyncio.run(p._do_lyric_full(FakeEvent("u1"), "某歌"))
         self.assertIn("暂不支持歌词显示", self._text(result))
 
@@ -370,9 +386,14 @@ class TestNewFeatures(unittest.TestCase):
             stats = MusicStats(td)
             stats.data["songs"] = {
                 "netease:1": {
-                    "title": "夜航星", "artist": "不才", "source": "netease",
-                    "count": 3, "last_at": int(time.time()),
-                    "daily": {}, "groups": {}, "users": {"u1": 2, "u2": 1},
+                    "title": "夜航星",
+                    "artist": "不才",
+                    "source": "netease",
+                    "count": 3,
+                    "last_at": int(time.time()),
+                    "daily": {},
+                    "groups": {},
+                    "users": {"u1": 2, "u2": 1},
                 }
             }
             p.stats = stats
@@ -405,15 +426,23 @@ class TestNewFeatures(unittest.TestCase):
         today = date.today().isoformat()
         p.stats.data["songs"] = {
             "netease:1": {
-                "title": "晴天", "artist": "周杰伦", "source": "netease",
-                "count": 5, "last_at": int(time.time()),
-                "daily": {today: 5}, "groups": {"10001": 3, "20002": 2},
+                "title": "晴天",
+                "artist": "周杰伦",
+                "source": "netease",
+                "count": 5,
+                "last_at": int(time.time()),
+                "daily": {today: 5},
+                "groups": {"10001": 3, "20002": 2},
                 "users": {"u1": 5},
             },
             "netease:2": {
-                "title": "夜曲", "artist": "周杰伦", "source": "netease",
-                "count": 2, "last_at": int(time.time()),
-                "daily": {today: 2}, "groups": {"10001": 2},
+                "title": "夜曲",
+                "artist": "周杰伦",
+                "source": "netease",
+                "count": 2,
+                "last_at": int(time.time()),
+                "daily": {today: 2},
+                "groups": {"10001": 2},
                 "users": {"u2": 2},
             },
         }
@@ -478,7 +507,10 @@ class TestNewFeatures(unittest.TestCase):
         self.assertEqual(len(sent), 2)
         self.assertEqual(len(pushed), 2)
         # 推送顺序与目标群顺序无关：按群号校验
-        self.assertEqual(sorted(s for s, _ in sent), ["蓝轩宇:GroupMessage:10001", "蓝轩宇:GroupMessage:20002"])
+        self.assertEqual(
+            sorted(s for s, _ in sent),
+            ["蓝轩宇:GroupMessage:10001", "蓝轩宇:GroupMessage:20002"],
+        )
         self.assertIn("晴天", sent[0][1])
 
     def test_report_push_skipped_wrong_weekday(self):
@@ -542,6 +574,7 @@ class TestNewFeatures(unittest.TestCase):
             if p._push_task:
                 p._push_task.cancel()
             return started
+
         self.assertTrue(asyncio.run(scenario()))
 
     def test_hot_push_task_not_started_when_disabled(self):
@@ -554,7 +587,9 @@ class TestNewFeatures(unittest.TestCase):
         state = {"used": 0}
         p.quota = SimpleNamespace(
             used_today=lambda uid, day: state["used"],
-            consume=lambda uid, day: (state.__setitem__("used", state["used"] + 1) or state["used"]),
+            consume=lambda uid, day: (
+                state.__setitem__("used", state["used"] + 1) or state["used"]
+            ),
         )
         # daily_limit=1 时超限拦截
         p.config["daily_limit"] = 1
@@ -571,10 +606,14 @@ class TestNewFeatures(unittest.TestCase):
         state = {"used": 0}
         p.quota = SimpleNamespace(
             used_today=lambda uid, day: state["used"],
-            consume=lambda uid, day: (state.__setitem__("used", state["used"] + 1) or state["used"]),
+            consume=lambda uid, day: (
+                state.__setitem__("used", state["used"] + 1) or state["used"]
+            ),
         )
+
         async def fake_hot(limit=5):
             return [mk_item(title="热歌", mid="1")]
+
         p.sources.get_hot = fake_hot
         result = asyncio.run(p._do_hot(FakeEvent("u1")))
         self.assertIn("热歌", self._text(result))
@@ -634,32 +673,45 @@ class TestAdminCommands(unittest.TestCase):
 
     def test_song_admin_denied_for_non_admin(self):
         p = make_plugin()
-        ev = FakeEvent(sender_id="u1", is_admin=False, message_str="song set search_limit 3")
+        ev = FakeEvent(
+            sender_id="u1", is_admin=False, message_str="song set search_limit 3"
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("只有管理员", self._text(result))
 
     def test_set_global_updates_config(self):
         p = make_plugin()
-        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song set search_limit 3")
+        ev = FakeEvent(
+            sender_id="u1", is_admin=True, message_str="song set search_limit 3"
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("已更新全局 search_limit = 3", self._text(result))
         self.assertEqual(p.config["search_limit"], 3)
 
     def test_set_unknown_key_rejected(self):
         p = make_plugin()
-        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song set not_a_key 1")
+        ev = FakeEvent(
+            sender_id="u1", is_admin=True, message_str="song set not_a_key 1"
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("未知配置项", self._text(result))
 
     def test_set_numeric_key_non_number_rejected(self):
         p = make_plugin()
-        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song set search_limit abc")
+        ev = FakeEvent(
+            sender_id="u1", is_admin=True, message_str="song set search_limit abc"
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("需要数字", self._text(result))
 
     def test_gset_per_group(self):
         p = make_plugin(search_limit=5)
-        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song gset search_limit 2", group_id="g1")
+        ev = FakeEvent(
+            sender_id="u1",
+            is_admin=True,
+            message_str="song gset search_limit 2",
+            group_id="g1",
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("已设置本群 search_limit = 2", self._text(result))
         self.assertEqual(p.groups.get_key("g1", "search_limit"), 2)
@@ -669,7 +721,12 @@ class TestAdminCommands(unittest.TestCase):
     def test_greset_single_key(self):
         p = make_plugin(search_limit=5)
         p.groups.set_key("g1", "search_limit", 2)
-        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song greset search_limit", group_id="g1")
+        ev = FakeEvent(
+            sender_id="u1",
+            is_admin=True,
+            message_str="song greset search_limit",
+            group_id="g1",
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("已清除", self._text(result))
         self.assertIsNone(p.groups.get_key("g1", "search_limit"))
@@ -678,7 +735,9 @@ class TestAdminCommands(unittest.TestCase):
         p = make_plugin()
         p.groups.set_key("g1", "search_limit", 2)
         p.groups.set_key("g1", "daily_limit", 9)
-        ev = FakeEvent(sender_id="u1", is_admin=True, message_str="song greset", group_id="g1")
+        ev = FakeEvent(
+            sender_id="u1", is_admin=True, message_str="song greset", group_id="g1"
+        )
         result = asyncio.run(p.song_admin(ev))
         self.assertIn("已清除", self._text(result))
         self.assertEqual(p.groups.data.get("g1"), None)
@@ -691,7 +750,9 @@ class TestAdminCommands(unittest.TestCase):
         # 重复屏蔽返回已在列表
         result2 = asyncio.run(p.song_admin(ev))
         self.assertIn("已在屏蔽列表", self._text(result2))
-        ev3 = FakeEvent(sender_id="u1", is_admin=True, message_str="song unblock 违禁词")
+        ev3 = FakeEvent(
+            sender_id="u1", is_admin=True, message_str="song unblock 违禁词"
+        )
         result3 = asyncio.run(p.song_admin(ev3))
         self.assertIn("已解除屏蔽", self._text(result3))
 

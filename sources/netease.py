@@ -20,7 +20,10 @@ HOT_URL = "https://music.163.com/api/playlist/detail"
 HOT_PLAYLIST = "3778678"
 
 # 分享链接：music.163.com/song?id=xxx / #/song?id=xxx / outer/url?id=xxx
-SHARE_RE = re.compile(r"music\.163\.com/(?:#/)?song(?:\?.*?&?id=(\d+)|/media/outer/url\?.*?id=(\d+))", re.I)
+SHARE_RE = re.compile(
+    r"music\.163\.com/(?:#/)?song(?:\?.*?&?id=(\d+)|/media/outer/url\?.*?id=(\d+))",
+    re.IGNORECASE,
+)
 
 
 def _parse_song(s: dict) -> MusicItem:
@@ -38,7 +41,9 @@ def _parse_song(s: dict) -> MusicItem:
         id=str(s.get("id", "")),
         title=s.get("name", ""),
         artist=artists,
-        album=(s.get("album") or {}).get("name", "") if isinstance(s.get("album"), dict) else "",
+        album=(s.get("album") or {}).get("name", "")
+        if isinstance(s.get("album"), dict)
+        else "",
         duration=int(s.get("duration", 0) or 0) // 1000,
         artwork=(s.get("album") or {}).get("picUrl", "") or "",
     )
@@ -62,7 +67,9 @@ class NeteaseSource(MusicSource):
             "X-Real-IP": "",
         }
 
-    def _sync_search(self, url: str, params: dict, extra_headers: dict | None = None) -> dict:
+    def _sync_search(
+        self, url: str, params: dict, extra_headers: dict | None = None
+    ) -> dict:
         headers = {**self._headers(), **(extra_headers or {})}
         r = self.session.get(url, params=params, headers=headers, timeout=12)
         # 请求失败/被风控时打日志
@@ -73,7 +80,9 @@ class NeteaseSource(MusicSource):
             data = r.json()
             # 网易云风控时可能返回 JSON 字符串（如 "请求过于频繁"），需防御
             if not isinstance(data, dict):
-                logger.warning(f"[netease] 搜索响应非 JSON 对象: {type(data).__name__}, {str(data)[:80]}")
+                logger.warning(
+                    f"[netease] 搜索响应非 JSON 对象: {type(data).__name__}, {str(data)[:80]}"
+                )
                 return {}
             return data
         except Exception as e:
@@ -100,6 +109,7 @@ class NeteaseSource(MusicSource):
 
     async def search_by_lyric(self, keyword: str, limit: int = 5) -> list[MusicItem]:
         """按歌词片段搜索（网易云 type=1006）"""
+
         def _do():
             return self._sync_search(
                 SEARCH_URL,
@@ -122,6 +132,7 @@ class NeteaseSource(MusicSource):
         接口：/api/v1/resource/comments/R_SO_4_{song_id}?limit=1&offset=0
         hotComments[0] 为官方热评，content 字段为评论文本。
         """
+
         def _do():
             r = self.session.get(
                 f"https://music.163.com/api/v1/resource/comments/R_SO_4_{item.id}",
@@ -154,6 +165,7 @@ class NeteaseSource(MusicSource):
 
     async def get_lyric(self, item: MusicItem, max_lines: int = 4) -> str:
         """获取逐字歌词，截取前若干有效行返回纯文本；失败返回空串"""
+
         def _do():
             r = self.session.get(
                 LYRIC_URL,
@@ -208,7 +220,9 @@ class NeteaseSource(MusicSource):
             return ""
         d = j.get("data") if isinstance(j, dict) else None
         if not isinstance(d, list) or not d:
-            logger.warning(f"[netease] 播放地址接口无数据: {item.id}, code={j.get('code') if isinstance(j, dict) else '?'}")
+            logger.warning(
+                f"[netease] 播放地址接口无数据: {item.id}, code={j.get('code') if isinstance(j, dict) else '?'}"
+            )
             return ""
         first = d[0] if isinstance(d[0], dict) else {}
         url = first.get("url") or ""

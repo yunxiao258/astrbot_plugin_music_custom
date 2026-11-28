@@ -30,7 +30,12 @@ class KugouSource(MusicSource):
         def _do():
             r = self.session.get(
                 SEARCH_URL,
-                params={"keyword": keyword, "page": 1, "pagesize": limit, "platform": "WebFilter"},
+                params={
+                    "keyword": keyword,
+                    "page": 1,
+                    "pagesize": limit,
+                    "platform": "WebFilter",
+                },
                 headers=self._headers(),
                 timeout=12,
             )
@@ -65,18 +70,27 @@ class KugouSource(MusicSource):
 
     async def get_media_url(self, item: MusicItem, quality: str = "standard") -> str:
         """v2 play/getdata 接口；dfid 缺失时先访问主页获取"""
+
         def _do():
             try:
                 self.session.get("https://www.kugou.com/", timeout=8)
             except Exception:
                 pass
-            dfid = self.session.cookies.get("kg_dfid") or self.session.cookies.get("dfid") or "1Q2W3E4R5T6"
+            dfid = (
+                self.session.cookies.get("kg_dfid")
+                or self.session.cookies.get("dfid")
+                or "1Q2W3E4R5T6"
+            )
             r = self.session.get(
                 PLAY_URL,
                 params={
-                    "r": "play/getdata", "hash": item.id,
+                    "r": "play/getdata",
+                    "hash": item.id,
                     "album_id": item.extra.get("album_id", ""),
-                    "dfid": dfid, "mid": "1234567890", "platid": 4, "appid": 1014,
+                    "dfid": dfid,
+                    "mid": "1234567890",
+                    "platid": 4,
+                    "appid": 1014,
                 },
                 headers=self._headers(),
                 timeout=12,
@@ -89,7 +103,9 @@ class KugouSource(MusicSource):
             url = data.get("play_url") or data.get("url") or ""
             if url.startswith("http"):
                 return url
-            logger.warning(f"[kugou] 播放地址获取失败（可能被风控）: {item.title}, status={j.get('status', '')}")
+            logger.warning(
+                f"[kugou] 播放地址获取失败（可能被风控）: {item.title}, status={j.get('status', '')}"
+            )
         except Exception as e:
             logger.warning(f"[kugou] 播放地址获取异常: {e}")
         return ""
