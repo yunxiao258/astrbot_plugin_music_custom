@@ -96,20 +96,33 @@ jobs:
                   def __init__(self, file="", url="", **kw):
                       self.file = file
                       self.url = url
+                      self.__dict__.update(kw)
+                  @classmethod
+                  def fromURL(cls, url):
+                      if not str(url).startswith(("http://", "https://")):
+                          raise ValueError(f"invalid url: {url}")
+                      return cls(url=url)
                   @classmethod
                   def fromFileSystem(cls, path):
                       return cls(file=path)
+                  @classmethod
+                  def fromBytes(cls, data):
+                      return cls(data=data)
               class Record(BaseMessageComponent):
                   type = "Record"
                   def __init__(self, file="", url="", **kw):
                       self.file = file
                       self.url = url
+                      self.__dict__.update(kw)
                   @classmethod
                   def fromURL(cls, url):
                       return cls(url=url)
                   @classmethod
                   def fromFileSystem(cls, path):
                       return cls(file=path)
+                  @classmethod
+                  def fromBytes(cls, data):
+                      return cls(data=data)
               class File(BaseMessageComponent):
                   type = "File"
                   def __init__(self, name="", file="", **kw):
@@ -145,6 +158,8 @@ jobs:
                       return self
                   def get_plain_text(self):
                       return "".join(getattr(c, "text", "") for c in self.chain)
+                  def __str__(self):
+                      return self.get_plain_text()
               class MessageEventResult(MessageChain): pass
           ''')
 
@@ -180,10 +195,18 @@ jobs:
               class AstrMessageEvent: pass
           ''')
 
-          w("api/provider.py", "class ProviderRequest: pass\nclass LLMResponse: pass\n")
-          w("core/provider/entities.py", "class LLMResponse: pass\n")
-          w("core/star/filter/command.py", "class GreedyStr(str): pass\n")
-          w("core/star/star.py", "class StarMetadata: pass\n")
+          _llm_resp = '''
+              class LLMResponse:
+                  def __init__(self, role="assistant", completion_text=None, result_chain=None, **kw):
+                      self.role = role
+                      self.completion_text = completion_text
+                      self.result_chain = result_chain
+                      self.__dict__.update(kw)
+          '''
+          w("api/provider.py", "class ProviderRequest:\n    def __init__(self, **kw): self.__dict__.update(kw)\n" + _llm_resp)
+          w("core/provider/entities.py", _llm_resp)
+          w("core/star/filter/command.py", "class GreedyStr(str): pass\nclass CommandFilter: pass\n")
+          w("core/star/star.py", "class StarMetadata:\n    def __init__(self, **kw): self.__dict__.update(kw)\n")
           w("core/star/command_management.py", "async def list_commands(*a, **kw): return []\n")
           w("core/utils/astrbot_path.py", '''
               import os, tempfile
@@ -191,10 +214,18 @@ jobs:
                   return os.path.join(tempfile.gettempdir(), "astrbot_ci_data")
           ''')
           w("api/star.py", '''
+              import pathlib, tempfile
               class Context: pass
               class Star:
                   def __init__(self, context=None, *a, **kw):
                       self.context = context
+              class StarTools:
+                  @classmethod
+                  def get_data_dir(cls, plugin_name=None):
+                      base = pathlib.Path(tempfile.gettempdir()) / "astrbot_ci_data" / "plugin_data"
+                      p = base / (plugin_name or "default_plugin")
+                      p.mkdir(parents=True, exist_ok=True)
+                      return p
               def register(*a, **kw):
                   return lambda cls: cls
           ''')

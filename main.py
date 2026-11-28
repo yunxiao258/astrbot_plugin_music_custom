@@ -14,7 +14,7 @@ from astrbot.api.all import MessageChain, MessageEventResult
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.message_components import Image, Music, Plain, Record
 from astrbot.api.platform import MessageType
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.star.filter.command import GreedyStr
 
 from .netease_login import (
@@ -95,7 +95,7 @@ try:
 except ImportError:
     from hub_bridge import HUB_PROTOCOL_VERSION, emit_hub_event
 
-PLUGIN_VERSION = "1.8.1"
+PLUGIN_VERSION = "1.9.0"
 PLUGIN_AUTHOR = "云晓"
 
 
@@ -107,12 +107,33 @@ class MusicPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None, data_dir: str | None = None):
         super().__init__(context)
         self.config = config or {}
-        # 数据目录：AstrBot 标准 plugin_data（仅读写插件自身文件，绝不触碰全局配置）
-        self.data_dir = data_dir or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "plugin_data",
-            "astrbot_plugin_music_custom",
-        )
+        # 数据目录：优先使用 AstrBot 官方 StarTools.get_data_dir()（仅读写插件自身文件，绝不触碰全局配置）
+        if data_dir:
+            self.data_dir = os.path.abspath(data_dir)
+        else:
+            try:
+                self.data_dir = os.path.abspath(str(StarTools.get_data_dir("astrbot_plugin_music_custom")))
+            except Exception:
+                self.data_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                    "plugin_data",
+                    "astrbot_plugin_music_custom",
+                )
+            _legacy_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "plugin_data",
+                "astrbot_plugin_music_custom",
+            )
+            if os.path.isdir(_legacy_dir) and os.path.abspath(_legacy_dir) != self.data_dir:
+                import shutil
+                os.makedirs(self.data_dir, exist_ok=True)
+                try:
+                    for _fn in os.listdir(_legacy_dir):
+                        _sp, _dp = os.path.join(_legacy_dir, _fn), os.path.join(self.data_dir, _fn)
+                        if os.path.isfile(_sp) and not os.path.exists(_dp):
+                            shutil.copy2(_sp, _dp)
+                except Exception:
+                    pass
         os.makedirs(self.data_dir, exist_ok=True)
         self.sources = SourceManager(self.config)
         self.stats = MusicStats(self.data_dir) if self.config.get("enable_stats", True) else None

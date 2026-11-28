@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """music_custom 插件单元测试：配置读取、管理员判定、限频、结果合并去重、缓存清理"""
 import asyncio
 import os
